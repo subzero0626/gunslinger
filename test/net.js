@@ -1,6 +1,7 @@
 // PeerJS 온라인 PVP (방장/게스트)
 window.GunNet = (() => {
   const PREFIX = 'gunslinger-pvp-';
+  const NOT_FOUND = '수배 대상자를 찾을 수 없습니다';
   let peer = null, conn = null;
   let role = null; // 'host' | 'guest'
   let roomCode = '';
@@ -26,13 +27,34 @@ window.GunNet = (() => {
     return normalizeCode(String(id || '').replace(PREFIX, ''));
   }
 
+  function statusFromError(err) {
+    const type = err && err.type;
+    if (type === 'peer-unavailable' || type === 'network' || type === 'server-error') {
+      return NOT_FOUND;
+    }
+    if (type === 'unavailable-id') return '수배 번호를 다시 게시합니다…';
+    return NOT_FOUND;
+  }
+
   function wireConn(c) {
     conn = c;
+    let joinTimer = null;
     c.on('data', data => onMessage(data));
     c.on('close', () => onStatus('연결 끊김'));
-    c.on('error', err => onStatus('연결 오류: ' + (err.message || err)));
-    if (c.open) onReady(role, roomCode);
-    else c.on('open', () => onReady(role, roomCode));
+    c.on('error', () => onStatus(NOT_FOUND));
+    const ready = () => {
+      if (joinTimer) { clearTimeout(joinTimer); joinTimer = null; }
+      onReady(role, roomCode);
+    };
+    if (c.open) ready();
+    else {
+      c.on('open', ready);
+      if (role === 'guest') {
+        joinTimer = setTimeout(() => {
+          if (!conn || !conn.open) onStatus(NOT_FOUND);
+        }, 4000);
+      }
+    }
   }
 
   function host() {
@@ -61,10 +83,10 @@ window.GunNet = (() => {
           onStatus('사냥꾼이 수락했습니다');
           wireConn(c);
         });
-        peer.on('error', e2 => onStatus('오류: ' + (e2.type || e2.message || e2)));
+        peer.on('error', () => onStatus(NOT_FOUND));
         return;
       }
-      onStatus('오류: ' + (err.type || err.message || err));
+      onStatus(statusFromError(err));
     });
   }
 
@@ -79,7 +101,7 @@ window.GunNet = (() => {
       wireConn(c);
       onStatus('현상금 수락 요청 중…');
     });
-    peer.on('error', err => onStatus('오류: ' + (err.type || err.message || err)));
+    peer.on('error', err => onStatus(statusFromError(err)));
   }
 
   function send(data) {
