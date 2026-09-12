@@ -420,41 +420,58 @@
       bindRoles('host');
       GunNet.host();
     } else if (result.isDenied) {
-      let autoJoin = false;
-      const { value: code } = await Swal.fire({
+      let joined = false;
+      const joinNow = code => {
+        const n = String(code || '').replace(/\D/g, '').slice(0, 4);
+        if (n.length !== 4 || joined) return false;
+        joined = true;
+        GunNet.join(n);
+        if (Swal.isVisible()) Swal.close();
+        return true;
+      };
+      await Swal.fire({
         ...swalWanted,
         title: '현상금 수락',
+        html: '<p style="margin:0 0 8px;opacity:.75">수배 번호 4자리를 입력하면 바로 들어갑니다</p>',
         input: 'text',
-        inputLabel: '수배 번호 (숫자 4자리)',
         inputPlaceholder: '0000',
         inputAttributes: {
-          maxlength: 4,
+          maxlength: '4',
           inputmode: 'numeric',
           pattern: '[0-9]*',
           autocomplete: 'off',
+          autocapitalize: 'off',
+          spellcheck: 'false',
         },
         showCancelButton: true,
         showConfirmButton: false,
         cancelButtonText: '취소',
-        inputValidator: v => {
-          const n = String(v || '').replace(/\D/g, '');
-          if (n.length !== 4) return '숫자 4자리를 입력하세요';
-        },
+        allowEnterKey: true,
         didOpen: () => {
           const input = Swal.getInput();
           if (!input) return;
-          input.focus();
-          input.addEventListener('input', () => {
+          input.setAttribute('maxlength', '4');
+          setTimeout(() => input.focus(), 30);
+          const onType = () => {
             const digits = String(input.value || '').replace(/\D/g, '').slice(0, 4);
             if (input.value !== digits) input.value = digits;
-            if (digits.length === 4 && !autoJoin) {
-              autoJoin = true;
-              Swal.clickConfirm();
-            }
-          });
+            if (digits.length === 4) joinNow(digits);
+          };
+          input.addEventListener('input', onType);
+          input.addEventListener('keyup', onType);
+          input.addEventListener('paste', () => setTimeout(onType, 0));
+        },
+        preConfirm: () => {
+          const input = Swal.getInput();
+          const n = String(input?.value || '').replace(/\D/g, '').slice(0, 4);
+          if (n.length !== 4) {
+            Swal.showValidationMessage('숫자 4자리를 입력하세요');
+            return false;
+          }
+          joinNow(n);
+          return n;
         },
       });
-      if (code) GunNet.join(code);
     }
   }
 
