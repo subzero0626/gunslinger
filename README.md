@@ -4,8 +4,8 @@
 
 ## 플레이
 
-- 로컬: `test/index.html` 을 로컬 서버로 열기
-- GitHub Pages: https://subzero0626.github.io/gunslinger/
+- https://subzero0626.github.io/gunslinger/
+- 또는 이 저장소의 `index.html`을 로컬 서버로 열기
 
 ## 조작
 
