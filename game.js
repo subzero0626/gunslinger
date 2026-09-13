@@ -88,17 +88,19 @@
   const BENCH_TOP = 0.86;  // 벤치 윗면 높이 (아래에서부터 비율)
 
   // ---------- 마을 건물 ----------
-  // k = 캐릭터 키의 몇 배인지, enter = 안에 들어가면 벽이 비쳐 보이는 건물
-  const TOWN_ROW = [
-    { key: 'watertower', k: 2.55, gap: 58 },
-    { key: 'shop', k: 1.72, gap: 66 },
-    { key: 'inn', k: 2.25, gap: 72, enter: true },
-    { key: 'smithy', k: 2.35, gap: 72, enter: true },
-    { key: 'church', k: 2.60, gap: 210, enter: true, boardGap: true }, // 게시판이 들어갈 넓은 골목
-    { key: 'saloon', k: 2.20, gap: 66, enter: true },
-    { key: 'house', k: 1.90, gap: 0, enter: true },
-  ];
+  // k = 캐릭터 키의 몇 배. 안에서 총싸움이 될 만큼 크게 잡는다.
+  const BUILDINGS = {
+    shop: { k: 2.9 },
+    inn: { k: 3.3 },
+    smithy: { k: 3.3 },
+    church: { k: 3.7 },
+    warehouse: { k: 3.0 },
+    saloon: { k: 3.2 },
+    house: { k: 3.0 },
+  };
+  const MATCH_POOL = ['inn', 'smithy', 'church', 'warehouse', 'saloon', 'house'];
   const town = [];
+  let matchTown = null; // 결투용 2채 { keys, mid } — 호스트가 뽑아 게스트에게 보낸다
 
   const sources = {
     ...A.images,
@@ -107,10 +109,7 @@
     wantedBoard: 'assets/wanted-board.png',
     wantedPaper: 'assets/wanted-paper.png',
   };
-  for (const b of TOWN_ROW) {
-    sources['t_' + b.key] = `assets/town/${b.key}.png`;
-    if (b.enter) sources['t_' + b.key + '_in'] = `assets/town/${b.key}_in.png`;
-  }
+  for (const key of Object.keys(BUILDINGS)) sources['t_' + key] = `assets/town/${key}.png`;
   let pending = Object.keys(sources).length;
   for (const [name, src] of Object.entries(sources)) {
     const im = new Image();
@@ -523,6 +522,8 @@
     matchAge = 0;
     currentLaw = null;
     hideLawCard();
+    matchTown = null;
+    layoutTown();
     me = players[0];
     resetMatchSpawn();
     me.x = W * 0.28;
@@ -551,14 +552,7 @@
   }
 
   function placePortal() {
-    // 건물에 가리지 않게 넓게 비워둔 골목 자리에 세움
-    let bx = W * 0.62;
-    for (let i = 0; i < town.length - 1; i++) {
-      if (!town[i].boardGap) continue;
-      bx = (town[i].x + town[i].w / 2 + town[i + 1].x - town[i + 1].w / 2) / 2;
-      break;
-    }
-    board.x = bx;
+    board.x = W * 0.62;
     board.y = groundY();
   }
 
@@ -848,6 +842,8 @@
       setLaw(data.id);
       if (lockT > 0) resetMatchSpawn(); // 법칙에 따라 체력/탄창이 달라짐
       showLawCard();
+    } else if (data.t === 'town') {
+      setMatchTown({ keys: data.keys, mid: data.mid });
     }
   }
 
@@ -922,12 +918,14 @@
     matchOver = false;
     overOpen = false;
     if (window.Swal && Swal.isVisible()) Swal.close();
+    layoutTown();
     resetMatchSpawn();
     clearInputs();
     matchAge = 0;
     lockT = 2.8;
     if (myRole === 'host') {
       pickHostLaw();
+      pickHostTown();
       resetMatchSpawn();   // 법칙에 따라 체력/탄창이 달라짐
       showLawCard();
     } else if (currentLaw) {
@@ -973,55 +971,156 @@
     for (const pl of players) if (pl.onGround) pl.y = groundY();
   });
 
-  // 건물을 거리처럼 한 줄로 늘어놓고, 화면이 좁으면 통째로 줄임
+  function buildingSize(key) {
+    const im = IMG['t_' + key];
+    const h = BODY_H * BUILDINGS[key].k;
+    return { h, w: im && im.width ? im.width * h / im.height : h };
+  }
+
+  // 메인화면은 오른쪽 끝 상점 하나, 결투 중에는 뽑힌 2채가 거리 중앙 엄폐물
   function layoutTown() {
-    const items = TOWN_ROW.map(b => {
-      const im = IMG['t_' + b.key];
-      const h = BODY_H * b.k;
-      return { ...b, h, w: im && im.width ? im.width * h / im.height : h };
-    });
-    const total = items.reduce((s, it) => s + it.w + it.gap, 0) - items[items.length - 1].gap;
-    const scale = Math.min(1, (W - 60) / total);
-    const prev = new Map(town.map(b => [b.key, b.reveal]));
+    const keep = new Map(town.map(b => [b.key, b.reveal]));
+    const push = (key, x, w, h) => town.push({ key, x, w, h, reveal: keep.get(key) || 0 });
     town.length = 0;
-    let x = (W - total * scale) / 2;
-    for (const it of items) {
-      const w = it.w * scale, h = it.h * scale;
-      town.push({ key: it.key, enter: !!it.enter, boardGap: !!it.boardGap, x: x + w / 2, w, h, reveal: prev.get(it.key) || 0 });
-      x += w + it.gap * scale;
+
+    if (netReady) {
+      if (!matchTown) return; // 게스트는 호스트가 뽑은 건물이 올 때까지 빈 거리
+      const sz = matchTown.keys.map(buildingSize);
+      const span = sz[0].w + sz[1].w + matchTown.mid;
+      // 두 스폰 지점(0.28W·0.72W) 사이에만 세워서 시작할 때는 아무도 건물 안에 없게 한다
+      const scale = Math.min(1, (W * 0.44 - 80) / span);
+      let x = W / 2 - (span * scale) / 2;
+      sz.forEach((s, i) => {
+        const w = s.w * scale;
+        push(matchTown.keys[i], x + w / 2, w, s.h * scale);
+        x += w + matchTown.mid * scale;
+      });
+    } else {
+      const s = buildingSize('shop');
+      const scale = Math.min(1, (W * 0.34) / s.w);
+      const w = s.w * scale;
+      push('shop', W - w / 2 - 14, w, s.h * scale);
     }
-    placePortal();
   }
 
+  function setMatchTown(t) {
+    matchTown = t;
+    for (const b of town) b.reveal = 0;
+    layoutTown();
+  }
+
+  function pickHostTown() {
+    const pool = MATCH_POOL.slice();
+    const keys = [pool.splice(Math.floor(Math.random() * pool.length), 1)[0],
+                  pool.splice(Math.floor(Math.random() * pool.length), 1)[0]];
+    const mid = 70 + Math.floor(Math.random() * 90); // 가운데 골목 폭
+    setMatchTown({ keys, mid });
+    if (window.GunNet) GunNet.send({ t: 'town', keys, mid });
+  }
+
+  // 내가 들어간 건물만 반투명해진다 (상대가 들어가도 나에겐 안 보임)
   function updateTown(dt) {
-    const list = netReady ? players : [me];
     for (const b of town) {
-      if (!b.enter) continue;
-      let inside = false;
-      for (const pl of list) {
-        if (pl && pl.hp > 0 && Math.abs(pl.x - b.x) < b.w * 0.42) { inside = true; break; }
-      }
-      b.reveal = approach(b.reveal, inside ? 1 : 0, dt * 3.6);
+      const inside = me && me.hp > 0 && Math.abs(me.x - b.x) < b.w * 0.42;
+      b.reveal = approach(b.reveal, inside ? 1 : 0, dt * 4);
     }
   }
 
-  // 외관 → (들어가면) 반투명해지고 안쪽 컷어웨이가 드러남
-  function drawTown(gy) {
+  // 실내(어두운 방 + 등불)와 아래쪽만 비치는 벽을 건물 실루엣 모양으로 만들어 캐시
+  const townCache = new Map();
+
+  function cached(kind, key, bw, bh, build) {
+    const w = Math.max(1, Math.round(bw)), h = Math.max(1, Math.round(bh));
+    const ck = `${kind}|${key}|${w}|${h}`;
+    const hit = townCache.get(ck);
+    if (hit) return hit;
+    const c = document.createElement('canvas');
+    c.width = w; c.height = h;
+    build(c.getContext('2d'), w, h);
+    if (townCache.size > 40) townCache.clear();
+    townCache.set(ck, c);
+    return c;
+  }
+
+  const roomTop = h => h - Math.min(h * 0.64, BODY_H * 2.3);
+
+  function roomCanvas(key, bw, bh) {
+    return cached('room', key, bw, bh, (g, w, h) => {
+    const y0 = roomTop(h);
+    const rh = h - y0;
+
+    const lin = g.createLinearGradient(0, y0, 0, h);
+    lin.addColorStop(0, 'rgba(44,27,18,0)');
+    lin.addColorStop(0.16, 'rgba(44,27,18,0.94)');
+    lin.addColorStop(1, 'rgba(86,58,36,0.96)');
+    g.fillStyle = lin;
+    g.fillRect(0, y0, w, rh);
+
+    g.strokeStyle = 'rgba(26,15,9,0.3)';
+    g.lineWidth = 1;
+    g.beginPath();
+    for (let i = 1; i <= 3; i++) {
+      const fy = Math.round(h - rh * 0.05 * i) + 0.5;
+      g.moveTo(0, fy); g.lineTo(w, fy);
+    }
+    g.stroke();
+
+    const lx = w * 0.76, ly = y0 + rh * 0.2;
+    const rad = g.createRadialGradient(lx, ly, 2, lx, ly, w * 0.6);
+    rad.addColorStop(0, 'rgba(255,201,122,0.85)');
+    rad.addColorStop(0.4, 'rgba(233,152,74,0.3)');
+    rad.addColorStop(1, 'rgba(220,140,70,0)');
+    g.fillStyle = rad;
+    g.fillRect(0, y0, w, rh);
+
+    g.globalCompositeOperation = 'destination-in';
+    g.drawImage(IMG['t_' + key], 0, 0, w, h);
+    });
+  }
+
+  // 지붕·2층은 그대로 두고 방이 있는 아래쪽 벽만 비쳐 보이는 판본
+  function seeThroughCanvas(key, bw, bh) {
+    return cached('wall', key, bw, bh, (g, w, h) => {
+      g.drawImage(IMG['t_' + key], 0, 0, w, h);
+      const y0 = roomTop(h);
+      const grad = g.createLinearGradient(0, y0, 0, y0 + (h - y0) * 0.3);
+      grad.addColorStop(0, 'rgba(0,0,0,0)');
+      grad.addColorStop(1, 'rgba(0,0,0,0.62)');
+      g.globalCompositeOperation = 'destination-out';
+      g.fillStyle = grad;
+      g.fillRect(0, y0, w, h - y0);
+    });
+  }
+
+  // 실내는 인물보다 먼저, 벽은 나중에 → 같은 건물에 들어온 상대는 보이고 딴 건물에 숨은 상대는 벽에 가려진다
+  function drawTownRooms(gy) {
     for (const b of town) {
       const ext = IMG['t_' + b.key];
       if (!ext || !ext.width) continue;
       const r = smooth(b.reveal);
-      ctx.save();
-      ctx.globalAlpha = 1 - r * 0.72;
-      ctx.drawImage(ext, b.x - b.w / 2, gy - b.h + 2, b.w, b.h);
-      ctx.restore();
       if (r <= 0.01) continue;
-      const int = IMG['t_' + b.key + '_in'];
-      if (!int || !int.width) continue;
-      const iw = int.width * b.h / int.height;
       ctx.save();
       ctx.globalAlpha = r;
-      ctx.drawImage(int, b.x - iw / 2, gy - b.h + 2, iw, b.h);
+      ctx.drawImage(roomCanvas(b.key, b.w, b.h), b.x - b.w / 2, gy - b.h + 2, b.w, b.h);
+      ctx.restore();
+    }
+  }
+
+  function drawTownWalls(gy) {
+    for (const b of town) {
+      const ext = IMG['t_' + b.key];
+      if (!ext || !ext.width) continue;
+      const r = smooth(b.reveal);
+      const x = b.x - b.w / 2, y = gy - b.h + 2;
+      ctx.save();
+      if (r < 0.999) {
+        ctx.globalAlpha = 1 - r;
+        ctx.drawImage(ext, x, y, b.w, b.h);
+      }
+      if (r > 0.001) {
+        ctx.globalAlpha = r;
+        ctx.drawImage(seeThroughCanvas(b.key, b.w, b.h), x, y, b.w, b.h);
+      }
       ctx.restore();
     }
   }
@@ -2027,22 +2126,25 @@
     ctx.save();
     ctx.translate(offX, offY);
     drawGround(gy);
-    drawTown(gy);
     drawBackProps(gy, t);
     drawTargets();
     if (!netReady) drawWantedBoard(t);
+    drawTownRooms(gy);
     {
       const list = netReady ? players : [me];
       const states = list.map(pl => playerState(pl, t));
       if (states.some(S => S.idle && S.skin !== 'guest') && idle) warpIdle(t, idle);
       if (states.some(S => S.idle && S.skin === 'guest') && idleBlue) warpIdle(t, idleBlue);
-      states.forEach((S, i) => {
-        const pl = list[i];
+      const paint = (S, pl) => {
         drawCharacter(S);
         pl.shoulder = S.shoulder;
         if (S.muzzle) pl.muzzle = S.muzzle;
-      });
-      if (netReady) for (const pl of players) drawHeadHpBar(pl);
+        if (netReady) drawHeadHpBar(pl);
+      };
+      // 상대는 건물보다 먼저 그려 벽에 가려진다(= 건물이 엄폐물). 나는 항상 벽 위에.
+      states.forEach((S, i) => { if (list[i] !== me) paint(S, list[i]); });
+      drawTownWalls(gy);
+      states.forEach((S, i) => { if (list[i] === me) paint(S, list[i]); });
     }
     drawEffects();
     ctx.restore();
