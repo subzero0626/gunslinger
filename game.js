@@ -10,6 +10,7 @@
     W = innerWidth; H = innerHeight;
     cvs.width = W * DPR; cvs.height = H * DPR;
     cvs.style.width = W + 'px'; cvs.style.height = H + 'px';
+    ctx.imageSmoothingQuality = 'high';
   }
   addEventListener('resize', resize);
   resize();
@@ -109,7 +110,6 @@
     wantedBoard: 'assets/wanted-board.png',
     wantedPaper: 'assets/wanted-paper.png',
   };
-  for (const key of Object.keys(BUILDINGS)) sources['t_' + key] = `assets/town/${key}.png`;
   let pending = Object.keys(sources).length;
   for (const [name, src] of Object.entries(sources)) {
     const im = new Image();
@@ -117,6 +117,15 @@
     im.onerror = () => { console.warn('failed to load', name); if (--pending === 0) start(); };
     im.src = src;
     IMG[name] = im;
+  }
+
+  // 건물 그림은 커서 시작을 막지 않고 뒤에서 받아온다 (그리는 쪽에서 로드 여부를 확인한다)
+  for (const key of Object.keys(BUILDINGS)) {
+    const im = new Image();
+    im.onload = () => { townCache.clear(); layoutTown(); };
+    im.onerror = () => console.warn('failed to load', key);
+    im.src = `assets/town/${key}.png`;
+    IMG['t_' + key] = im;
   }
 
   let GG = null;   // 팔/총 기하 정보
@@ -1050,14 +1059,14 @@
     const rh = h - y0;
 
     const lin = g.createLinearGradient(0, y0, 0, h);
-    lin.addColorStop(0, 'rgba(44,27,18,0)');
-    lin.addColorStop(0.16, 'rgba(44,27,18,0.94)');
-    lin.addColorStop(1, 'rgba(86,58,36,0.96)');
+    lin.addColorStop(0, 'rgba(26,16,10,0)');
+    lin.addColorStop(0.18, 'rgba(26,16,10,0.97)');
+    lin.addColorStop(1, 'rgba(54,35,22,0.98)');
     g.fillStyle = lin;
     g.fillRect(0, y0, w, rh);
 
-    g.strokeStyle = 'rgba(26,15,9,0.3)';
-    g.lineWidth = 1;
+    g.strokeStyle = 'rgba(14,8,5,0.45)';
+    g.lineWidth = Math.max(1, Math.round(h / 200));
     g.beginPath();
     for (let i = 1; i <= 3; i++) {
       const fy = Math.round(h - rh * 0.05 * i) + 0.5;
@@ -1065,11 +1074,12 @@
     }
     g.stroke();
 
-    const lx = w * 0.76, ly = y0 + rh * 0.2;
-    const rad = g.createRadialGradient(lx, ly, 2, lx, ly, w * 0.6);
-    rad.addColorStop(0, 'rgba(255,201,122,0.85)');
-    rad.addColorStop(0.4, 'rgba(233,152,74,0.3)');
-    rad.addColorStop(1, 'rgba(220,140,70,0)');
+    // 벽에 걸린 등불 하나 — 좁게 떨어뜨려 실내가 어둡게 읽히도록
+    const lx = w * 0.72, ly = y0 + rh * 0.24;
+    const rad = g.createRadialGradient(lx, ly, 1, lx, ly, Math.min(w, rh) * 0.42);
+    rad.addColorStop(0, 'rgba(255,206,132,0.72)');
+    rad.addColorStop(0.35, 'rgba(226,145,68,0.22)');
+    rad.addColorStop(1, 'rgba(210,130,62,0)');
     g.fillStyle = rad;
     g.fillRect(0, y0, w, rh);
 
