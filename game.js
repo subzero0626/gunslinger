@@ -1116,6 +1116,19 @@
     }
   }
 
+  // 총알이 이번 걸음에 벽면을 지나갔는지 — 지나갔으면 그 자리에서 막힌다.
+  // 안에 숨으면 안전하지만 쏘려면 문 밖으로 나와야 한다.
+  function wallCrossing(b, prevX, gy) {
+    for (const t of town) {
+      if (b.y < gy - t.h || b.y > gy) continue;
+      const half = t.w * 0.42;
+      for (const wx of [t.x - half, t.x + half]) {
+        if ((prevX < wx && b.x >= wx) || (prevX > wx && b.x <= wx)) return wx;
+      }
+    }
+    return null;
+  }
+
   function drawTownWalls(gy) {
     for (const b of town) {
       const ext = IMG['t_' + b.key];
@@ -1415,7 +1428,15 @@
       const b = bullets[i];
       let dead = false;
       for (let s = 0; s < 4 && !dead; s++) {
+        const prevX = b.x;
         b.x += b.vx * dt / 4; b.y += b.vy * dt / 4;
+        const wx = wallCrossing(b, prevX, gy);
+        if (wx !== null) {
+          impact(wx, b.y); sparks(wx, b.y, 5, false);
+          shake = Math.min(shake + 1.5, 8);
+          dead = true;
+          break;
+        }
         for (const t of targets) {
           if (t.alive && Math.abs(b.x - t.x) < 6 && b.y < t.y && b.y > t.y - 24) {
             t.alive = false; t.respawn = 1.6; shatter(t); dead = true; break;
