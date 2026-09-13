@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Gunslinger</title>
+<script src="https://cdn.tailwindcss.com"></script>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/sweetalert2@11/dist/sweetalert2.min.css">
 <style>
   html, body { margin: 0; height: 100%; overflow: hidden; background: #1c1618; }
@@ -122,6 +123,7 @@
     opacity: 0.7;
   }
   #wantedStatus .close:hover { opacity: 1; }
+
   @keyframes wanted-pop {
     0% { opacity: 0; transform: translateX(-50%) translateY(-16px) scale(0.86) rotate(-1.5deg); }
     60% { opacity: 1; transform: translateX(-50%) translateY(2px) scale(1.04) rotate(0.6deg); }
@@ -144,6 +146,23 @@
 </head>
 <body>
 <div id="wantedStatus"></div>
+<div id="titleCard" class="pointer-events-none fixed left-1/2 top-7 z-20 -translate-x-1/2 text-center transition-opacity duration-500">
+  <h1 class="m-0 font-serif text-[40px] font-bold leading-none tracking-[0.28em] text-[#f7e2b8] drop-shadow-[3px_4px_0_rgba(20,10,6,0.6)]">GUNSLINGER</h1>
+  <div class="mx-auto mt-2 h-px w-40 bg-[#f0d9ae]/40"></div>
+  <p class="mt-2 font-serif text-[12px] tracking-[0.14em] text-[#f0d9ae]/75">현상수배 게시판으로 가서 <span class="font-bold text-[#ffd27a]">E</span></p>
+</div>
+<div id="lawCard" class="pointer-events-none fixed left-1/2 top-[46%] z-30 w-[210px] -translate-x-1/2 -translate-y-1/2 -rotate-2 scale-90 opacity-0 transition duration-300">
+  <div class="relative flex h-[330px] w-[210px] flex-col rounded-[14px] border-[3px] border-[#6e281c]/70 bg-gradient-to-br from-[#f6e6c4] via-[#ead6b4] to-[#d8b888] shadow-[5px_8px_0_rgba(20,10,6,0.4)]">
+    <div class="absolute inset-[7px] rounded-[8px] border border-[#6e281c]/25"></div>
+    <div class="absolute left-3 top-2.5 font-serif text-[10px] font-bold tracking-[0.22em] text-[#6e281c]/80">WANTED</div>
+    <div class="absolute right-3 top-2.5 font-serif text-lg leading-none text-[#8b2e1f]">♠</div>
+    <div id="lawIcon" class="absolute left-1/2 top-[37%] flex h-[82px] w-[82px] -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border-2 border-[#6e281c]/25 bg-[#fdf3dc]/50 p-3.5"></div>
+    <h2 class="absolute left-3 right-3 top-[58%] text-center font-serif text-[17px] font-bold tracking-wide text-[#6e281c]"></h2>
+    <p class="law-text absolute left-4 right-4 top-[70%] text-center font-serif text-[12px] leading-snug text-[#3d2a1c]/80"></p>
+    <div class="absolute bottom-2.5 left-3 rotate-180 font-serif text-lg leading-none text-[#8b2e1f]">♠</div>
+    <div class="absolute bottom-2.5 right-3 rotate-180 font-serif text-[10px] font-bold tracking-[0.22em] text-[#6e281c]/80">WANTED</div>
+  </div>
+</div>
 <canvas id="game"></canvas>
 <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11/dist/sweetalert2.all.min.js"></script>
 <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>

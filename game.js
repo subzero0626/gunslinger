@@ -44,22 +44,22 @@
   }
 
   // ---------- 크기 / 수치 ----------
-  const BODY_H = 110;                       // 화면에서 캐릭터 키(px)
+  const BODY_H = 99;                        // 화면에서 캐릭터 키(px)
   const BODY_K = BODY_H / A.meta.walk[0].h;
   const MAX_HP = 10;
   const DMG_BODY = 1, DMG_HEAD = 3;
   const ARM_K = BODY_K * 0.62 * 0.84;
   const GUN_K = BODY_K * 0.55 * 0.84;
   const ARM_FRAME = 2;                      // 팔을 앞으로 뻗은 프레임
-  const AMMO = 6, RELOAD_TIME = 1.1, DODGE_TIME = 0.5;
+  const AMMO = 6, RELOAD_TIME = 1.5, DODGE_TIME = 0.5;
   const RUN_SPEED = 375, BACK_SPEED = RUN_SPEED * 0.65, DODGE_SPEED = 720, JUMP_V = 880;
   const BULLET_SPEED = 3200;
   const RUN_STRIDE = 26;                    // 프레임 1장당 이동 거리(px) → 발 미끄러짐 방지
   // 시트마다 캐릭터가 그려진 크기가 달라서 모자 폭 기준으로 맞춤 (walk = 1)
   const ANIM_SCALE = { walk: 1, run: 1.26, jump: 1.13, dodge: 1.17 };
   const frameScale = (anim) => ANIM_SCALE[anim];
-  const SHOULDER_BACK = 25, SHOULDER_DOWN = 5; // 어깨를 몸 안쪽·위쪽으로 (화면 px)
-  const CAPE_OVER_R = 24;                     // 팔 위로 망토를 다시 덮는 반경 (화면 px)
+  const SHOULDER_BACK = 22, SHOULDER_DOWN = 4.4; // 어깨를 몸 안쪽·위쪽으로 (화면 px)
+  const CAPE_OVER_R = 22;                     // 팔 위로 망토를 다시 덮는 반경 (화면 px)
 
   // ---------- 월드 / 소품 배치 ----------
   const WORLD_W = 2600;
@@ -87,6 +87,19 @@
   const SINK = { cactus: 0.06, signpost: 0.06, fence: 0.07, wheel: 0.06, rocks: 0.12, deadbush: 0.1, campfire: 0.08, lamppost: 0.05, wanted: 0.05, bottle: 0.25 };
   const BENCH_TOP = 0.86;  // 벤치 윗면 높이 (아래에서부터 비율)
 
+  // ---------- 마을 건물 ----------
+  // k = 캐릭터 키의 몇 배인지, enter = 안에 들어가면 벽이 비쳐 보이는 건물
+  const TOWN_ROW = [
+    { key: 'watertower', k: 2.55, gap: 58 },
+    { key: 'shop', k: 1.72, gap: 66 },
+    { key: 'inn', k: 2.25, gap: 72, enter: true },
+    { key: 'smithy', k: 2.35, gap: 72, enter: true },
+    { key: 'church', k: 2.60, gap: 210, enter: true, boardGap: true }, // 게시판이 들어갈 넓은 골목
+    { key: 'saloon', k: 2.20, gap: 66, enter: true },
+    { key: 'house', k: 1.90, gap: 0, enter: true },
+  ];
+  const town = [];
+
   const sources = {
     ...A.images,
     props: PR.image,
@@ -94,6 +107,10 @@
     wantedBoard: 'assets/wanted-board.png',
     wantedPaper: 'assets/wanted-paper.png',
   };
+  for (const b of TOWN_ROW) {
+    sources['t_' + b.key] = `assets/town/${b.key}.png`;
+    if (b.enter) sources['t_' + b.key + '_in'] = `assets/town/${b.key}_in.png`;
+  }
   let pending = Object.keys(sources).length;
   for (const [name, src] of Object.entries(sources)) {
     const im = new Image();
@@ -183,6 +200,7 @@
     setupIdleBlue();
     buildWorld();
     layoutTargets();
+    layoutTown();
     last = performance.now();
     requestAnimationFrame(loop);
   }
@@ -340,7 +358,121 @@
   let myRole = null; // 'host' | 'guest'
   let me = null, other = null;
   let netAcc = 0;
-  const board = { x: 0, y: 0, open: false, near: false, status: '', h: 160, w: 200 };
+  let matchOver = false;
+  let overOpen = false;
+  let myRematch = false;
+  let otherRematch = false;
+  let lastOverWin = false;
+  let lockT = 0;
+  let matchAge = 0;
+  let currentLaw = null;
+  let lawCardT = 0;
+  // 카드 아이콘: 굵은 선 하나로 알아볼 수 있게만
+  const lawSvg = inner => '<svg viewBox="0 0 64 64" fill="none" stroke="#6e281c" stroke-width="3.2" '
+    + 'stroke-linecap="round" stroke-linejoin="round" width="100%" height="100%">' + inner + '</svg>';
+  const LAWS = [
+    {
+      id: 'lastshot', title: '마지막 한 발',
+      text: '여섯 번째 탄환은 상대를 크게 밀친다',
+      icon: lawSvg('<path d="M32 10l8 10v26H24V20z"/><path d="M24 34h16"/>'),
+    },
+    {
+      id: 'hat', title: '날아간 모자',
+      text: '헤드샷을 맞으면 잠깐 조준이 흔들린다',
+      icon: lawSvg('<path d="M20 34c0-12 4-18 12-18s12 6 12 18"/><path d="M10 38c8 6 36 6 44 0"/>'),
+    },
+    {
+      id: 'bell', title: '먼저 장전한 자',
+      text: '상대보다 먼저 장전을 마치면 다음 한 발을 더 빨리 뽑는다',
+      icon: lawSvg('<path d="M18 44c0-16 4-24 14-24s14 8 14 24z"/><path d="M14 44h36"/><path d="M32 50v4"/>'),
+    },
+    {
+      id: 'misfire', title: '기능 고장',
+      text: '장전할 때 3~6발만 채워진다',
+      icon: lawSvg('<circle cx="32" cy="32" r="16"/><path d="M24 24l16 16M40 24L24 40"/>'),
+    },
+    {
+      id: 'clumsy', title: '어설픈 회피',
+      text: '구르기가 절반만 총알을 피한다',
+      icon: lawSvg('<path d="M46 24a18 18 0 10-6 22"/><path d="M46 12v13H33"/>'),
+    },
+    {
+      id: 'sniper', title: '저격수',
+      text: '머리를 맞출 때만 피해가 들어간다',
+      icon: lawSvg('<circle cx="32" cy="32" r="15"/><path d="M32 8v10M32 46v10M8 32h10M46 32h10"/>'),
+    },
+    {
+      id: 'glass', title: '유리 몸',
+      text: '모든 피해가 두 배로 들어간다',
+      icon: lawSvg('<path d="M32 50S14 38 14 26a10 10 0 0118-6 10 10 0 0118 6c0 12-18 24-18 24z"/><path d="M32 20l-6 12h12l-6 10"/>'),
+    },
+    {
+      id: 'hasty', title: '성급한 손',
+      text: '더 빨리 쏘지만 장전이 두 배로 느리다',
+      icon: lawSvg('<path d="M36 8L18 36h12l-4 20 20-30H34z"/>'),
+    },
+    {
+      id: 'iron', title: '무쇠 심장',
+      text: '두 사람 모두 더 튼튼해진다',
+      icon: lawSvg('<path d="M32 54S12 40 12 26a10 10 0 0120-6 10 10 0 0120 6c0 14-20 28-20 28z"/><path d="M24 32h16M32 24v16"/>'),
+    },
+    {
+      id: 'shackle', title: '발목의 족쇄',
+      text: '아무도 뛰어오를 수 없다',
+      icon: lawSvg('<circle cx="22" cy="24" r="9"/><circle cx="42" cy="42" r="9"/><path d="M28 30l8 6"/>'),
+    },
+    {
+      id: 'shortcyl', title: '짧은 탄창',
+      text: '탄창에 세 발만 들어간다',
+      icon: lawSvg('<circle cx="32" cy="32" r="17"/><circle cx="32" cy="22" r="3.4"/><circle cx="24" cy="38" r="3.4"/><circle cx="40" cy="38" r="3.4"/>'),
+    },
+  ];
+  const lawCardEl = document.getElementById('lawCard');
+
+  function lawById(id) {
+    return LAWS.find(l => l.id === id) || null;
+  }
+
+  function lawIs(id) {
+    return !!currentLaw && currentLaw.id === id;
+  }
+
+  function lawMaxHp() { return lawIs('iron') ? 16 : MAX_HP; }
+  function lawAmmo() { return lawIs('shortcyl') ? 3 : AMMO; }
+  function lawReloadTime() { return lawIs('hasty') ? RELOAD_TIME * 2 : RELOAD_TIME; }
+  function lawCooldown() { return lawIs('hasty') ? 0.26 : 0.5; }
+
+  function setLaw(id) {
+    currentLaw = lawById(id);
+    if (!currentLaw || !lawCardEl) return;
+    const title = lawCardEl.querySelector('h2');
+    const text = lawCardEl.querySelector('.law-text');
+    const icon = lawCardEl.querySelector('#lawIcon');
+    if (title) title.textContent = currentLaw.title;
+    if (text) text.textContent = currentLaw.text;
+    if (icon) icon.innerHTML = currentLaw.icon;
+  }
+
+  function showLawCard() {
+    if (!currentLaw || !lawCardEl) return;
+    lawCardT = 2.8;
+    lawCardEl.classList.remove('opacity-0', 'scale-90');
+    lawCardEl.classList.add('opacity-100', 'scale-100');
+  }
+
+  function hideLawCard() {
+    lawCardT = 0;
+    if (!lawCardEl) return;
+    lawCardEl.classList.add('opacity-0', 'scale-90');
+    lawCardEl.classList.remove('opacity-100', 'scale-100');
+  }
+
+  function pickHostLaw() {
+    const id = LAWS[Math.floor(Math.random() * LAWS.length)].id;
+    setLaw(id);
+    if (window.GunNet) GunNet.send({ t: 'law', id });
+  }
+  const board = { x: 0, y: 0, open: false, near: false, status: '', h: 143, w: 180 };
   const wantedStatusEl = document.getElementById('wantedStatus');
   const swalWanted = {
     customClass: { popup: 'swal-wanted' },
@@ -381,9 +513,21 @@
   function cancelWantedLobby() {
     if (window.GunNet) GunNet.cancel();
     myRole = null;
-    me = players[0];
     other = null;
     netReady = false;
+    matchOver = false;
+    overOpen = false;
+    myRematch = false;
+    otherRematch = false;
+    lockT = 0;
+    matchAge = 0;
+    currentLaw = null;
+    hideLawCard();
+    me = players[0];
+    resetMatchSpawn();
+    me.x = W * 0.28;
+    me.facing = 1;
+    if (window.Swal && Swal.isVisible()) Swal.close();
     setPortalStatus('');
   }
 
@@ -395,8 +539,26 @@
     });
   }
 
+  const titleEl = document.getElementById('titleCard');
+  let titleShown = true;
+
+  function syncTitle() {
+    if (!titleEl) return;
+    const show = !netReady && !board.status && !board.open;
+    if (show === titleShown) return;
+    titleShown = show;
+    titleEl.classList.toggle('opacity-0', !show);
+  }
+
   function placePortal() {
-    board.x = W * 0.62;
+    // 건물에 가리지 않게 넓게 비워둔 골목 자리에 세움
+    let bx = W * 0.62;
+    for (let i = 0; i < town.length - 1; i++) {
+      if (!town[i].boardGap) continue;
+      bx = (town[i].x + town[i].w / 2 + town[i + 1].x - town[i + 1].w / 2) / 2;
+      break;
+    }
+    board.x = bx;
     board.y = groundY();
   }
 
@@ -487,7 +649,11 @@
     if (e.repeat || !me) return;
     if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) return;
     keys[e.code] = true;
-    if (e.code === 'Space' || e.code === 'KeyW') { me.jumpQueued = 0.12; e.preventDefault(); }
+    if (locked()) return;
+    if (e.code === 'Space' || e.code === 'KeyW') {
+      if (!lawIs('shackle')) me.jumpQueued = 0.12;
+      e.preventDefault();
+    }
     if (e.code === 'KeyR') startReload(me);
     if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') startDodge(me, moveDir());
     if (e.code === 'KeyE' && board.near && !netReady) {
@@ -499,13 +665,25 @@
   addEventListener('keyup', e => { keys[e.code] = false; });
   cvs.addEventListener('mousemove', e => { mouse.x = e.clientX; mouse.y = e.clientY; });
   cvs.addEventListener('mousedown', e => {
-    if (e.button === 0) { mouse.down = true; if (me && !board.open) tryFire(me); }
+    if (e.button === 0) { mouse.down = true; if (me && !board.open && !locked()) tryFire(me); }
   });
   addEventListener('mouseup', () => { mouse.down = false; });
   cvs.addEventListener('contextmenu', e => e.preventDefault());
 
   function moveDir() {
     return (keys.KeyD || keys.ArrowRight ? 1 : 0) - (keys.KeyA || keys.ArrowLeft ? 1 : 0);
+  }
+
+  function locked() {
+    return !me || matchOver || lockT > 0 || me.hp <= 0;
+  }
+
+  function clearInputs() {
+    for (const k of Object.keys(keys)) keys[k] = false;
+    mouse.down = false;
+    for (const pl of players) {
+      pl.vx = 0; pl.vy = 0; pl.jumpQueued = 0; pl.dodgeT = 0;
+    }
   }
 
   // ---------- 플레이어 ----------
@@ -520,6 +698,7 @@
       dodgeT: 0, dodgeDir: 1, dodgeCD: 0,
       shoulder: { x: 0, y: 0 }, muzzle: { x: 0, y: 0 },
       hp: MAX_HP, hpShow: MAX_HP, hpDrain: 1, invuln: 0, jumpQueued: 0,
+      hatT: 0, bellNext: false, dodgeSafe: true, reloadMax: RELOAD_TIME,
     };
   }
   const players = [makePlayer(0, 'host'), makePlayer(1, 'guest')];
@@ -539,9 +718,12 @@
     players[0].facing = 1;
     players[0].onGround = true;
     players[0].init = true;
-    players[0].hp = MAX_HP; players[0].hpShow = MAX_HP;
-    players[0].ammo = AMMO; players[0].reloadT = 0;
+    players[0].hp = lawMaxHp(); players[0].hpShow = players[0].hp;
+    players[0].ammo = lawAmmo(); players[0].reloadT = 0;
     players[0].invuln = 0; players[0].dodgeT = 0;
+    players[0].hatT = 0; players[0].bellNext = false;
+    players[0].dodgeSafe = true; players[0].reloadMax = lawReloadTime();
+    players[0].net = null;
 
     players[1].x = W * 0.72;
     players[1].y = gy;
@@ -549,9 +731,17 @@
     players[1].facing = -1;
     players[1].onGround = true;
     players[1].init = true;
-    players[1].hp = MAX_HP; players[1].hpShow = MAX_HP;
-    players[1].ammo = AMMO; players[1].reloadT = 0;
+    players[1].hp = lawMaxHp(); players[1].hpShow = players[1].hp;
+    players[1].ammo = lawAmmo(); players[1].reloadT = 0;
     players[1].invuln = 0; players[1].dodgeT = 0;
+    players[1].hatT = 0; players[1].bellNext = false;
+    players[1].dodgeSafe = true; players[1].reloadMax = lawReloadTime();
+    players[1].net = null;
+    players[0].jumpQueued = 0;
+    players[1].jumpQueued = 0;
+    matchOver = false;
+    overOpen = false;
+    bullets.length = 0;
   }
 
   function packState(pl) {
@@ -564,36 +754,184 @@
       ammo: pl.ammo, reloadT: pl.reloadT, autoReload: pl.autoReload,
       cooldown: pl.cooldown, flashT: pl.flashT,
       dodgeT: pl.dodgeT, dodgeDir: pl.dodgeDir, dodgeCD: pl.dodgeCD,
-      hp: pl.hp, invuln: pl.invuln,
+      hp: pl.hp, invuln: pl.invuln, reloadMax: pl.reloadMax,
+      law: currentLaw ? currentLaw.id : '',
     };
   }
 
   function applyRemoteState(pl, s) {
-    pl.x = lerp(pl.x, s.x, pl.init ? 0.55 : 1);
-    pl.y = lerp(pl.y, s.y, pl.init ? 0.55 : 1);
-    pl.vx = s.vx; pl.vy = s.vy;
-    pl.facing = s.facing; pl.aim = s.aim; pl.onGround = s.onGround;
-    pl.runPhase = s.runPhase; pl.airT = s.airT; pl.landT = s.landT;
-    pl.squash = s.squash; pl.kick = s.kick;
-    pl.ammo = s.ammo; pl.reloadT = s.reloadT; pl.autoReload = s.autoReload;
-    pl.cooldown = s.cooldown; pl.flashT = s.flashT;
-    pl.dodgeT = s.dodgeT; pl.dodgeDir = s.dodgeDir; pl.dodgeCD = s.dodgeCD;
-    pl.hp = s.hp; pl.invuln = s.invuln;
     if (typeof s.hp === 'number' && pl.hpShow != null && pl.hpShow - s.hp >= DMG_HEAD - 0.1) {
       pl.hpDrain = 3;
     }
-    pl.init = true;
+    if (typeof s.hp === 'number') pl.hp = s.hp;
+    if (s.law && (!currentLaw || currentLaw.id !== s.law)) {
+      setLaw(s.law);
+      if (lockT > 0) { resetMatchSpawn(); showLawCard(); }
+    }
+    pl.net = {
+      x: s.x, y: s.y, vx: s.vx, vy: s.vy,
+      facing: s.facing, aim: s.aim, onGround: s.onGround,
+      airT: s.airT, landT: s.landT,
+      squash: s.squash, kick: s.kick,
+      ammo: s.ammo, reloadT: s.reloadT, autoReload: s.autoReload,
+      cooldown: s.cooldown, flashT: s.flashT,
+      dodgeT: s.dodgeT, dodgeDir: s.dodgeDir, dodgeCD: s.dodgeCD,
+      invuln: s.invuln, age: 0,
+    };
+    if (typeof s.reloadMax === 'number') pl.reloadMax = s.reloadMax;
+    if (!pl.init) {
+      pl.x = s.x; pl.y = s.y; pl.vx = s.vx; pl.vy = s.vy;
+      pl.facing = s.facing; pl.aim = s.aim;
+      pl.init = true;
+    }
+  }
+
+  function updateRemote(pl, dt, gy) {
+    const s = pl.net;
+    if (!s) return;
+    s.age += dt;
+    const look = Math.min(s.age, 0.14);
+    const tx = s.x + (s.vx || 0) * look;
+    let ty = s.y + (s.vy || 0) * look;
+    if (s.onGround) ty = gy;
+    const k = 1 - Math.pow(0.00035, dt);
+    pl.x = lerp(pl.x, tx, k);
+    pl.y = lerp(pl.y, ty, k);
+    pl.vx = lerp(pl.vx, s.vx || 0, k);
+    pl.vy = lerp(pl.vy, s.vy || 0, k);
+    pl.facing = s.facing;
+    if (typeof s.aim === 'number') pl.aim += angDiff(s.aim, pl.aim) * Math.min(1, dt * 18);
+    pl.onGround = s.onGround;
+    pl.dodgeDir = s.dodgeDir;
+    pl.ammo = s.ammo;
+    pl.reloadT = Math.max(0, (s.reloadT || 0) - s.age);
+    pl.autoReload = s.autoReload;
+    pl.cooldown = (s.cooldown || 0) - s.age;
+    pl.flashT = (s.flashT || 0) - s.age;
+    pl.dodgeT = Math.max(0, (s.dodgeT || 0) - s.age);
+    pl.dodgeCD = (s.dodgeCD || 0) - s.age;
+    pl.invuln = Math.max(0, (s.invuln || 0) - s.age);
+    pl.landT = (s.landT || 0) - s.age;
+    pl.airT = s.onGround ? 0 : (s.airT || 0) + s.age;
+    pl.squash = lerp(pl.squash, s.squash || 0, k);
+    pl.kick = lerp(pl.kick, s.kick || 0, k);
+    if (pl.onGround) pl.runPhase += Math.abs(pl.vx) * dt / RUN_STRIDE;
+    if (pl.y > gy) { pl.y = gy; pl.onGround = true; }
   }
 
   function onNetMessage(data) {
     if (!data || !other) return;
-    if (data.t === 'state') applyRemoteState(other, data);
-    else if (data.t === 'fire') {
+    if (data.t === 'state') {
+      applyRemoteState(other, data);
+      maybeGameOver();
+    } else if (data.t === 'fire') {
       bullets.push({
         x: data.x, y: data.y, vx: data.vx, vy: data.vy,
-        life: 1.2, ownerId: data.ownerId, net: true,
+        life: 1.2, ownerId: data.ownerId, net: true, last: !!data.last,
       });
       flashes.push({ x: data.x, y: data.y, t: 0 });
+    } else if (data.t === 'hurt') {
+      if (typeof data.hp === 'number') {
+        if (other.hpShow != null && other.hpShow - data.hp >= DMG_HEAD - 0.1) other.hpDrain = 3;
+        else if (data.head) other.hpDrain = 3;
+        other.hp = data.hp;
+      }
+      maybeGameOver();
+    } else if (data.t === 'over') {
+      if (other) other.hp = 0;
+      maybeGameOver();
+    } else if (data.t === 'rematch') {
+      otherRematch = true;
+      if (myRematch) beginRound();
+      else refreshOverDialog();
+    } else if (data.t === 'law') {
+      setLaw(data.id);
+      if (lockT > 0) resetMatchSpawn(); // 법칙에 따라 체력/탄창이 달라짐
+      showLawCard();
+    }
+  }
+
+  function maybeGameOver() {
+    if (!netReady || matchOver) return;
+    if (me.hp > 0 && (!other || other.hp > 0)) return;
+    matchOver = true;
+    myRematch = false;
+    otherRematch = false;
+    const win = me.hp > 0;
+    lastOverWin = win;
+    if (me.hp <= 0 && window.GunNet) GunNet.send({ t: 'over', loser: me.id });
+    showGameOver(win);
+  }
+
+  function overCopy() {
+    const title = lastOverWin ? '결투 승리' : '게임 오버';
+    if (myRematch && !otherRematch) return { title, text: '상대의 동의를 기다리는 중…' };
+    if (!myRematch && otherRematch) return { title, text: '상대가 다시 결투를 요청했습니다' };
+    return { title, text: lastOverWin ? '상대가 쓰러졌다' : '쓰러졌다' };
+  }
+
+  function refreshOverDialog() {
+    if (!overOpen || !window.Swal || !Swal.isVisible()) return;
+    const c = overCopy();
+    Swal.update({
+      title: c.title,
+      text: c.text,
+      showConfirmButton: !myRematch,
+      confirmButtonText: '다시 결투',
+      showDenyButton: true,
+      denyButtonText: '마을로',
+    });
+  }
+
+  function showGameOver(win) {
+    lastOverWin = win;
+    if (overOpen || !window.Swal || !matchOver) return;
+    overOpen = true;
+    const c = overCopy();
+    Swal.fire({
+      ...swalWanted,
+      title: c.title,
+      text: c.text,
+      showDenyButton: true,
+      showCancelButton: false,
+      showConfirmButton: !myRematch,
+      confirmButtonText: '다시 결투',
+      denyButtonText: '마을로',
+      allowOutsideClick: false,
+      allowEscapeKey: false,
+    }).then(res => {
+      if (res.isConfirmed) requestRematch();
+      else if (res.isDenied) cancelWantedLobby();
+      else overOpen = false;
+    });
+  }
+
+  function requestRematch() {
+    myRematch = true;
+    if (window.GunNet) GunNet.send({ t: 'rematch' });
+    if (otherRematch) beginRound();
+    else {
+      overOpen = false;
+      showGameOver(lastOverWin);
+    }
+  }
+
+  function beginRound() {
+    myRematch = false;
+    otherRematch = false;
+    matchOver = false;
+    overOpen = false;
+    if (window.Swal && Swal.isVisible()) Swal.close();
+    resetMatchSpawn();
+    clearInputs();
+    matchAge = 0;
+    lockT = 2.8;
+    if (myRole === 'host') {
+      pickHostLaw();
+      resetMatchSpawn();   // 법칙에 따라 체력/탄창이 달라짐
+      showLawCard();
+    } else if (currentLaw) {
+      showLawCard();
     }
   }
 
@@ -602,19 +940,10 @@
       status: setPortalStatus,
       ready: role => {
         bindRoles(role);
-        resetMatchSpawn();
         netReady = true;
         setPortalOpen(false);
         setPortalStatus('');
-        if (window.Swal) {
-          Swal.fire({
-            ...swalWanted,
-            title: '결투 성사',
-            text: role === 'host' ? '사냥꾼이 수락했습니다' : '결투장에 입장했습니다',
-            timer: 1600,
-            showConfirmButton: false,
-          });
-        }
+        beginRound();
       },
       message: onNetMessage,
     });
@@ -639,30 +968,90 @@
   addEventListener('resize', () => {
     if (!GG) return;
     layoutTargets();
+    layoutTown();
     placePortal();
     for (const pl of players) if (pl.onGround) pl.y = groundY();
   });
 
+  // 건물을 거리처럼 한 줄로 늘어놓고, 화면이 좁으면 통째로 줄임
+  function layoutTown() {
+    const items = TOWN_ROW.map(b => {
+      const im = IMG['t_' + b.key];
+      const h = BODY_H * b.k;
+      return { ...b, h, w: im && im.width ? im.width * h / im.height : h };
+    });
+    const total = items.reduce((s, it) => s + it.w + it.gap, 0) - items[items.length - 1].gap;
+    const scale = Math.min(1, (W - 60) / total);
+    const prev = new Map(town.map(b => [b.key, b.reveal]));
+    town.length = 0;
+    let x = (W - total * scale) / 2;
+    for (const it of items) {
+      const w = it.w * scale, h = it.h * scale;
+      town.push({ key: it.key, enter: !!it.enter, boardGap: !!it.boardGap, x: x + w / 2, w, h, reveal: prev.get(it.key) || 0 });
+      x += w + it.gap * scale;
+    }
+    placePortal();
+  }
+
+  function updateTown(dt) {
+    const list = netReady ? players : [me];
+    for (const b of town) {
+      if (!b.enter) continue;
+      let inside = false;
+      for (const pl of list) {
+        if (pl && pl.hp > 0 && Math.abs(pl.x - b.x) < b.w * 0.42) { inside = true; break; }
+      }
+      b.reveal = approach(b.reveal, inside ? 1 : 0, dt * 3.6);
+    }
+  }
+
+  // 외관 → (들어가면) 반투명해지고 안쪽 컷어웨이가 드러남
+  function drawTown(gy) {
+    for (const b of town) {
+      const ext = IMG['t_' + b.key];
+      if (!ext || !ext.width) continue;
+      const r = smooth(b.reveal);
+      ctx.save();
+      ctx.globalAlpha = 1 - r * 0.72;
+      ctx.drawImage(ext, b.x - b.w / 2, gy - b.h + 2, b.w, b.h);
+      ctx.restore();
+      if (r <= 0.01) continue;
+      const int = IMG['t_' + b.key + '_in'];
+      if (!int || !int.width) continue;
+      const iw = int.width * b.h / int.height;
+      ctx.save();
+      ctx.globalAlpha = r;
+      ctx.drawImage(int, b.x - iw / 2, gy - b.h + 2, iw, b.h);
+      ctx.restore();
+    }
+  }
+
   function startReload(pl) {
-    if (pl.reloadT > 0 || pl.ammo === AMMO) return;
-    pl.reloadT = RELOAD_TIME;
+    if (locked()) return;
+    if (pl.reloadT > 0 || pl.ammo >= lawAmmo()) return;
+    pl.reloadMax = lawReloadTime();
+    pl.reloadT = pl.reloadMax;
   }
 
   function startDodge(pl, moveDir) {
+    if (locked()) return;
     if (pl.dodgeT > 0 || pl.dodgeCD > 0 || !pl.onGround) return;
     pl.dodgeDir = moveDir || pl.facing;
     pl.dodgeT = DODGE_TIME;
     pl.dodgeCD = 1;
+    pl.dodgeSafe = lawIs('clumsy') ? Math.random() < 0.5 : true;
     pl.vx = pl.dodgeDir * DODGE_SPEED;
     dust(pl.x, pl.y, 6);
   }
 
   function tryFire(pl) {
-    if (!me || pl !== me) return;
+    if (!me || pl !== me || locked()) return;
     if (pl.reloadT > 0 || pl.cooldown > 0 || pl.dodgeT > 0) return;
     if (pl.ammo <= 0) { startReload(pl); return; }
     pl.ammo--;
-    pl.cooldown = 0.35;
+    const last = lawIs('lastshot') && pl.ammo === 0;
+    if (pl.bellNext) { pl.cooldown = lawCooldown() * 0.45; pl.bellNext = false; }
+    else pl.cooldown = lawCooldown();
     const airborne = !pl.onGround;
     pl.kickV += airborne ? 48 : 34;
     pl.flashT = 0.06;
@@ -671,9 +1060,10 @@
     if (airborne) a += rand(-0.04, 0.04); // 공중 사격: 아주 약한 탄퍼짐
     const { x, y } = pl.muzzle;
     const vx = Math.cos(a) * BULLET_SPEED, vy = Math.sin(a) * BULLET_SPEED;
-    bullets.push({ x, y, vx, vy, life: 1.2, ownerId: pl.id });
+    bullets.push({ x, y, vx, vy, life: 1.2, ownerId: pl.id, last });
     flashes.push({ x, y, t: 0 });
-    if (netReady && window.GunNet) GunNet.send({ t: 'fire', x, y, vx, vy, ownerId: pl.id });
+    if (netReady && window.GunNet) GunNet.send({ t: 'fire', x, y, vx, vy, ownerId: pl.id, last });
+    if (last) shake = Math.min(shake + 5, 14);
     for (let i = 0; i < 4; i++) {
       particles.push({
         type: 'smoke', x, y, vx: Math.cos(a) * rand(20, 60) + rand(-15, 15), vy: Math.sin(a) * rand(20, 60) - rand(15, 35),
@@ -728,6 +1118,20 @@
 
   // ---------- 업데이트 ----------
   function updatePlayer(pl, input, dt, gy) {
+    if (locked()) {
+      pl.vx = approach(pl.vx, 0, 1600 * dt);
+      pl.x = clamp(pl.x + pl.vx * dt, 40, W - 40);
+      pl.vy += 2300 * dt;
+      pl.y += pl.vy * dt;
+      if (pl.y >= gy) { pl.y = gy; pl.vy = 0; pl.onGround = true; }
+      else pl.onGround = false;
+      pl.dodgeT = 0;
+      pl.invuln = Math.max(0, pl.invuln - dt);
+      pl.flashT -= dt;
+      pl.squashV += (-300 * pl.squash - 18 * pl.squashV) * dt;
+      pl.squash += pl.squashV * dt;
+      return;
+    }
     const dir = input.dir;
     const prevFacing = pl.facing;
 
@@ -741,12 +1145,14 @@
       else if (input.aimX < pl.x - 6) pl.facing = -1;
       else if (dir !== 0) pl.facing = dir;
       const backing = dir !== 0 && dir !== pl.facing;
-      pl.vx = approach(pl.vx, dir * (backing ? BACK_SPEED : RUN_SPEED), (pl.onGround ? 2200 : 1300) * dt);
+      const walk = backing || pl.reloadT > 0;
+      pl.vx = approach(pl.vx, dir * (walk ? BACK_SPEED : RUN_SPEED), (pl.onGround ? 2200 : 1300) * dt);
     }
     pl.dodgeCD -= dt;
     pl.x = clamp(pl.x + pl.vx * dt, 40, W - 40);
 
     pl.jumpQueued -= dt;
+    if (lawIs('shackle')) pl.jumpQueued = 0;
     if (pl.jumpQueued > 0 && pl.onGround && pl.dodgeT <= 0) {
       pl.vy = -JUMP_V; pl.onGround = false; pl.airT = 0; pl.squashV -= 2.6; pl.jumpQueued = 0;
       dust(pl.x, gy, 5);
@@ -776,6 +1182,10 @@
     const target = aimRotation(pl.shoulder.x, pl.shoulder.y, pl.facing, input.aimX, input.aimY);
     if (prevFacing !== pl.facing) pl.aim = target;
     else pl.aim += angDiff(target, pl.aim) * Math.min(1, dt * 30);
+    if (pl.hatT > 0) {
+      pl.hatT -= dt;
+      pl.aim += Math.sin(pl.hatT * 26) * 0.045;
+    }
 
     pl.cooldown -= dt;
     pl.flashT -= dt;
@@ -783,12 +1193,17 @@
     if (pl.autoReload > 0) { pl.autoReload -= dt; if (pl.autoReload <= 0) startReload(pl); }
     if (pl.reloadT > 0) {
       pl.reloadT -= dt;
-      if (pl.reloadT <= 0) { pl.reloadT = 0; pl.ammo = AMMO; }
+      if (pl.reloadT <= 0) {
+        pl.reloadT = 0;
+        const full = lawAmmo();
+        pl.ammo = lawIs('misfire') ? Math.min(full, 3 + Math.floor(Math.random() * 4)) : full;
+        if (lawIs('bell') && other && other.reloadT > 0) pl.bellNext = true;
+      }
     }
   }
 
   function hitBox(pl, b) {
-    const hx = 22, top = pl.y - BODY_H * 0.95, bot = pl.y - 8;
+    const hx = 20, top = pl.y - BODY_H * 0.95, bot = pl.y - 8;
     return Math.abs(b.x - pl.x) <= hx && b.y >= top && b.y <= bot;
   }
 
@@ -800,21 +1215,36 @@
   }
 
   function hitPlayer(pl, b) {
-    if (pl.invuln > 0 || pl.hp <= 0 || pl.dodgeT > 0) return false;
+    if (pl.invuln > 0 || pl.hp <= 0) return false;
+    if (pl.dodgeT > 0 && pl.dodgeSafe !== false) return false;
     if (!hitBox(pl, b)) return false;
     const head = isHeadshot(pl, b);
-    const dmg = head ? DMG_HEAD : DMG_BODY;
+    // 저격수: 몸통은 스치기만 하고 피해가 없다
+    if (lawIs('sniper') && !head) {
+      impact(b.x, b.y);
+      sparks(b.x, b.y, 4, false);
+      return true;
+    }
+    let dmg = head ? DMG_HEAD : DMG_BODY;
+    if (lawIs('glass')) dmg *= 2;
     pl.hp = Math.max(0, pl.hp - dmg);
-    pl.hpDrain = head ? 3 : 1; // 헤드샷이면 체력바도 3배 빠르게
+    pl.hpDrain = dmg >= DMG_HEAD ? 3 : 1; // 큰 피해면 체력바도 빠르게
     pl.invuln = 0.95;
-    pl.vx += Math.sign(b.vx || 1) * (head ? 420 : 320);
-    pl.vy -= head ? 280 : 220;
+    const last = !!(b.last && lawIs('lastshot'));
+    pl.vx += Math.sign(b.vx || 1) * ((head ? 420 : 320) + (last ? 280 : 0));
+    pl.vy -= (head ? 280 : 220) + (last ? 140 : 0);
+    if (head && lawIs('hat')) pl.hatT = 1.15;
     pl.onGround = false;
     pl.squashV += head ? 3 : 2;
     impact(b.x, b.y);
     sparks(b.x, b.y, head ? 10 : 6, false);
     shake = Math.min(shake + (head ? 9 : 6), 14);
     if (head) headFlash = 0.22;
+    if (netReady && window.GunNet) {
+      GunNet.send({ t: 'hurt', hp: pl.hp, head: !!head });
+      if (pl.hp <= 0) GunNet.send({ t: 'over', loser: pl.id });
+    }
+    maybeGameOver();
     return true;
   }
 
@@ -830,11 +1260,22 @@
       placePortal();
     }
 
+    if (lockT > 0) lockT = Math.max(0, lockT - dt);
+    if (lawCardT > 0) {
+      lawCardT = Math.max(0, lawCardT - dt);
+      if (lawCardT <= 0) hideLawCard();
+    }
+    if (netReady && !matchOver && lockT <= 0) matchAge += dt;
+
     updatePlayer(me, {
-      dir: moveDir(),
+      dir: locked() ? 0 : moveDir(),
       aimX: mouse.x + camX,
       aimY: mouse.y,
     }, dt, gy);
+
+    if (netReady && other) updateRemote(other, dt, gy);
+    updateTown(dt);
+    syncTitle();
 
     // 체력바 표시값: 실제 HP를 향해 천천히 감소 (헤드샷이면 3배)
     for (const pl of players) {
@@ -890,7 +1331,7 @@
     }
 
     netAcc += dt;
-    if (netReady && netAcc >= 1 / 30 && window.GunNet) {
+    if (netReady && netAcc >= 1 / 20 && window.GunNet) {
       netAcc = 0;
       GunNet.send(packState(me));
     }
@@ -954,6 +1395,15 @@
   // 현재 상태 → 그릴 애니메이션/프레임
   function playerState(pl, t) {
     let anim = 'walk', i = 0, isIdle = false;
+    if (pl.hp <= 0) {
+      anim = 'jump'; i = 5;
+      return {
+        x: pl.x, y: pl.y, facing: pl.facing, anim, i, idle: false,
+        skin: pl.skin, invuln: 0,
+        sx: 1.08, sy: 0.72, R: pl.aim, kick: 0,
+        reload: 0, flashT: 0, showArm: false, dead: true,
+      };
+    }
     if (pl.dodgeT > 0) {
       anim = 'dodge';
       const n = A.meta.dodge.length;
@@ -965,7 +1415,7 @@
       anim = 'jump'; i = 5;
     } else if (Math.abs(pl.vx) > 60) {
       const backing = Math.sign(pl.vx) !== pl.facing;
-      anim = backing ? 'walk' : 'run';
+      anim = (backing || pl.reloadT > 0) ? 'walk' : 'run';
       i = Math.floor(pl.runPhase) % A.meta[anim].length;
     } else {
       isIdle = true;
@@ -977,7 +1427,7 @@
       sx: 1 + pl.squash * 0.7 - breath * 0.006,
       sy: 1 - pl.squash + breath * 0.014,
       R: pl.aim, kick: pl.kick,
-      reload: pl.reloadT > 0 ? 1 - pl.reloadT / RELOAD_TIME : 0,
+      reload: pl.reloadT > 0 ? 1 - pl.reloadT / (pl.reloadMax || RELOAD_TIME) : 0,
       flashT: pl.flashT, showArm: anim !== 'dodge',
     };
   }
@@ -1015,6 +1465,7 @@
     const ry = -recoil * 2.5 + (recoil > 0.08 ? (Math.random() - 0.5) * recoil * 3 : 0);
     ctx.save();
     let alpha = 1;
+    if (S.dead) alpha *= 0.72;
     if (S.invuln > 0 && Math.floor(S.invuln * 18) % 2 === 0) alpha *= 0.35;
     if (S.anim === 'dodge') {
       alpha *= 0.75;
@@ -1344,8 +1795,8 @@
 
   function drawHeadHpBar(pl) {
     if (pl.hp <= 0 && (pl.hpShow == null || pl.hpShow <= 0.02)) return;
-    const maxHp = MAX_HP;
-    const bw = 62, bh = 7, r = 3.5;
+    const maxHp = lawMaxHp();
+    const bw = 57, bh = 6.6, r = 3.3;
     const x = pl.x - bw / 2;
     const y = pl.y - BODY_H - 16;
     const shown = pl.hpShow == null ? pl.hp : pl.hpShow;
@@ -1425,9 +1876,9 @@
 
     // 수배지 3장 — 조금 더 크게, 아래로
     const posters = [
-      { dx: -48, dy: 78, h: 68, seed: 3.1, rot: -0.14 },
-      { dx: 0, dy: 82, h: 72, seed: 5.7, rot: 0.08 },
-      { dx: 48, dy: 76, h: 66, seed: 8.2, rot: 0.16 },
+      { dx: -43, dy: 70, h: 62, seed: 3.1, rot: -0.14 },
+      { dx: 0, dy: 74, h: 65, seed: 5.7, rot: 0.08 },
+      { dx: 43, dy: 68, h: 59, seed: 8.2, rot: 0.16 },
     ];
     for (const p of posters) {
       const sway = Math.sin(t * 1.4 + p.seed) * 0.4;
@@ -1454,10 +1905,22 @@
   function drawHUD() {
     if (!me) return;
 
+    if (netReady && currentLaw && lawCardT <= 0 && !matchOver) {
+      ctx.save();
+      ctx.font = '13px "Palatino Linotype", "Book Antiqua", "Malgun Gothic", serif';
+      ctx.textAlign = 'center';
+      ctx.fillStyle = 'rgba(244,230,208,0.72)';
+      ctx.fillText(currentLaw.title, W / 2, 28);
+      ctx.restore();
+    }
+
     // 내 탄약만 (게스트도 노란색)
-    const shown = me.reloadT > 0 ? Math.floor((1 - me.reloadT / RELOAD_TIME) * (AMMO + 1)) : me.ammo;
+    const cyl = lawAmmo();
+    const shown = me.reloadT > 0
+      ? Math.floor((1 - me.reloadT / (me.reloadMax || RELOAD_TIME)) * (cyl + 1))
+      : me.ammo;
     const ammoRight = me.skin === 'guest';
-    for (let i = 0; i < AMMO; i++) {
+    for (let i = 0; i < cyl; i++) {
       const x = ammoRight ? W - 24 - i * 18 : 24 + i * 18;
       const y = H - 30;
       ctx.fillStyle = i < shown ? '#e8c27a' : 'rgba(255,255,255,0.15)';
@@ -1472,10 +1935,10 @@
       ctx.font = '14px "Malgun Gothic", sans-serif';
       if (ammoRight) {
         ctx.textAlign = 'right';
-        ctx.fillText('재장전 중...', W - 24 - AMMO * 18 - 4, H - 26);
+        ctx.fillText('재장전 중...', W - 24 - cyl * 18 - 4, H - 26);
         ctx.textAlign = 'left';
       } else {
-        ctx.fillText('재장전 중...', 24 + AMMO * 18 + 8, H - 26);
+        ctx.fillText('재장전 중...', 24 + cyl * 18 + 8, H - 26);
       }
     }
 
@@ -1564,6 +2027,7 @@
     ctx.save();
     ctx.translate(offX, offY);
     drawGround(gy);
+    drawTown(gy);
     drawBackProps(gy, t);
     drawTargets();
     if (!netReady) drawWantedBoard(t);
