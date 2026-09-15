@@ -24,10 +24,13 @@
     user-select: text;
     touch-action: manipulation;
   }
-  canvas { display: block; cursor: none; touch-action: none; }
+  canvas {
+    display: block; cursor: none; touch-action: none;
+    position: fixed; left: 0; top: 0;
+  }
   #wipeLayer {
     position: fixed;
-    inset: 0;
+    left: 0; top: 0;
     width: 100%;
     height: 100%;
     z-index: 20000;
@@ -483,6 +486,7 @@
     object-fit: fill;
     transition: opacity 0.18s ease;
   }
+  #wantedBoard.is-ready .wanted-blank[data-blank="multi"],
   #wantedBoard.is-ready:has(.wanted-sheet[data-sheet="multi"]:hover) .wanted-blank[data-blank="multi"],
   #wantedBoard.is-ready:has(.wanted-sheet[data-sheet="multi"].is-open) .wanted-blank[data-blank="multi"],
   #wantedBoard.is-ready.is-hosting .wanted-blank[data-blank="multi"],
@@ -511,6 +515,8 @@
     pointer-events: none;
     transition: opacity 0.22s ease;
   }
+  #wantedBoard.is-ready .wanted-sheet.is-multi .wanted-acts,
+  #wantedBoard.is-ready .wanted-sheet.is-multi .wanted-mode,
   #wantedBoard.is-ready .wanted-sheet:hover .wanted-acts,
   #wantedBoard.is-ready .wanted-sheet.is-open .wanted-acts,
   #wantedBoard.is-ready .wanted-sheet:hover .wanted-wait,
@@ -561,6 +567,7 @@
     border-bottom: 1px solid rgba(110, 40, 28, 0.35);
     transition: opacity 0.18s ease;
   }
+  #wantedBoard.is-ready .wanted-sheet.is-multi .wanted-mode,
   #wantedBoard.is-ready .wanted-sheet:hover .wanted-mode,
   #wantedBoard.is-ready .wanted-sheet.is-open .wanted-mode,
   #wantedBoard.is-ready.is-hosting .wanted-sheet.is-multi .wanted-mode,

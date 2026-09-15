@@ -7,23 +7,61 @@
   const wipeCtx = wipeEl ? wipeEl.getContext('2d') : null;
   let W = 0, H = 0, DPR = 1;
 
+  function isLoFi() {
+    try { if (matchMedia('(pointer: coarse)').matches) return true; } catch (_) {}
+    return false;
+  }
+
+  const DESIGN_W = 1600, DESIGN_H = 900;
+
+  function placeLayer(el, cssW, cssH, left, top) {
+    if (!el) return;
+    el.style.position = 'fixed';
+    el.style.width = cssW + 'px';
+    el.style.height = cssH + 'px';
+    el.style.left = left + 'px';
+    el.style.top = top + 'px';
+    el.style.right = 'auto';
+    el.style.bottom = 'auto';
+    el.style.margin = '0';
+  }
+
   function resize() {
-    DPR = Math.min(window.devicePixelRatio || 1, 2);
-    W = innerWidth; H = innerHeight;
-    cvs.width = W * DPR; cvs.height = H * DPR;
-    cvs.style.width = W + 'px'; cvs.style.height = H + 'px';
-    cvs.style.touchAction = 'none';
-    ctx.imageSmoothingQuality = 'high';
+    const mobile = isLoFi();
+    let cssW, cssH, left, top, gameW, gameH;
+    if (mobile) {
+      gameW = DESIGN_W;
+      gameH = DESIGN_H;
+      const fit = Math.min(innerWidth / gameW, innerHeight / gameH);
+      cssW = gameW * fit;
+      cssH = gameH * fit;
+      left = (innerWidth - cssW) * 0.5;
+      top = (innerHeight - cssH) * 0.5;
+    } else {
+      gameW = innerWidth;
+      gameH = innerHeight;
+      cssW = gameW; cssH = gameH; left = 0; top = 0;
+    }
+    const nextDPR = mobile ? 1 : Math.min(window.devicePixelRatio || 1, 2);
+    if (gameW === W && gameH === H && nextDPR === DPR && cvs.width === Math.round(gameW * nextDPR)) {
+      placeLayer(cvs, cssW, cssH, left, top);
+      placeLayer(wipeEl, cssW, cssH, left, top);
+      return;
+    }
+    DPR = nextDPR;
+    W = gameW; H = gameH;
+    cvs.width = Math.round(W * DPR); cvs.height = Math.round(H * DPR);
+    placeLayer(cvs, cssW, cssH, left, top);
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = mobile ? 'low' : 'high';
     if (wipeEl && wipeCtx) {
-      wipeEl.width = W * DPR;
-      wipeEl.height = H * DPR;
-      wipeEl.style.width = W + 'px';
-      wipeEl.style.height = H + 'px';
+      wipeEl.width = Math.round(W * DPR);
+      wipeEl.height = Math.round(H * DPR);
+      placeLayer(wipeEl, cssW, cssH, left, top);
       wipeCtx.imageSmoothingEnabled = false;
     }
   }
   addEventListener('resize', resize);
-  if (window.visualViewport) visualViewport.addEventListener('resize', resize);
   resize();
 
   const QUERY = new URLSearchParams(location.search);
@@ -102,6 +140,18 @@
   }
 
   const groundY = () => groundAt(W * 0.5);
+
+  function prefetchArenaMaps() {
+    for (const id of MAP_IDS) {
+      if (id === 'flat') continue;
+      const key = 'map_' + id;
+      if (IMG[key]) continue;
+      const im = new Image();
+      im.onload = () => { IMG[key] = im; };
+      im.src = MAP_SRC[id];
+      IMG[key] = im;
+    }
+  }
 
   function setArenaMap(id) {
     if (!MAP_IDS.includes(id)) return false;
@@ -429,9 +479,6 @@
     ...A.images,
     props: PR.image,
     bg: MAP_SRC.flat,
-    map_hill: MAP_SRC.hill,
-    map_rise: MAP_SRC.rise,
-    map_drop: MAP_SRC.drop,
     wantedBoard: 'assets/wanted-sign.png?v=1',
     hudBullet0: 'assets/ui/bullet0.png',
     hudBullet1: 'assets/ui/bullet1.png',
@@ -542,6 +589,7 @@
     layoutTargets();
     useTownMap();
     snapViewRest();
+    prefetchArenaMaps();
     last = performance.now();
     requestAnimationFrame(loop);
   }
@@ -1429,14 +1477,38 @@
     };
   }
 
+  function evtXY(e) {
+    const r = cvs.getBoundingClientRect();
+    const rw = r.width || 1, rh = r.height || 1;
+    return {
+      x: (e.clientX - r.left) / rw * W,
+      y: (e.clientY - r.top) / rh * H,
+    };
+  }
+
+  function gameToClient(gx, gy) {
+    const r = cvs.getBoundingClientRect();
+    return {
+      x: r.left + gx / (W || 1) * r.width,
+      y: r.top + gy / (H || 1) * r.height,
+    };
+  }
+
+  function cssScale() {
+    const r = cvs.getBoundingClientRect();
+    return r.width / (W || 1);
+  }
+
   function layoutWantedHotspots() {
     if (!viewingBoard()) return;
     const lay = wantedLayout();
     const ready = boardZoomT() >= 0.88;
     if (wantedBoardEl) wantedBoardEl.classList.toggle('is-ready', ready);
-    const boardTL = worldToScreen(lay.x - lay.w / 2, lay.top);
-    const boardSW = lay.w * viewZ;
-    const boardSH = lay.h * viewZ;
+    const k = cssScale();
+    const boardG = worldToScreen(lay.x - lay.w / 2, lay.top);
+    const boardTL = gameToClient(boardG.x, boardG.y);
+    const boardSW = lay.w * viewZ * k;
+    const boardSH = lay.h * viewZ * k;
     wantedBoardEl.querySelectorAll('.wanted-blank').forEach(el => {
       el.style.left = boardTL.x + 'px';
       el.style.top = boardTL.y + 'px';
@@ -1446,9 +1518,10 @@
     lay.posters.forEach(p => {
       const el = wantedBoardEl.querySelector('[data-sheet="' + p.key + '"]');
       if (!el) return;
-      const c = worldToScreen(p.x, p.y);
-      const pw = p.w * viewZ;
-      const ph = p.h * viewZ;
+      const g = worldToScreen(p.x, p.y);
+      const c = gameToClient(g.x, g.y);
+      const pw = p.w * viewZ * k;
+      const ph = p.h * viewZ * k;
       el.style.left = (c.x - pw / 2) + 'px';
       el.style.top = (c.y - ph / 2) + 'px';
       el.style.width = pw + 'px';
@@ -1457,7 +1530,8 @@
     });
     const hint = wantedBoardEl.querySelector('.wanted-hint');
     if (hint) {
-      const c = worldToScreen(lay.x, lay.top + lay.h * 0.93);
+      const g = worldToScreen(lay.x, lay.top + lay.h * 0.93);
+      const c = gameToClient(g.x, g.y);
       hint.style.left = c.x + 'px';
       hint.style.top = c.y + 'px';
     }
@@ -1517,7 +1591,12 @@
     if (netReady) return;
     board.open = true;
     if (wantedNoticeEl) wantedNoticeEl.classList.remove('is-on');
-    if (wantedBoardEl) wantedBoardEl.classList.add('is-on');
+    if (wantedBoardEl) {
+      wantedBoardEl.classList.add('is-on');
+      wantedBoardEl.querySelectorAll('.wanted-sheet.is-open').forEach(el => el.classList.remove('is-open'));
+      const multi = wantedBoardEl.querySelector('.wanted-sheet.is-multi');
+      if (multi) multi.classList.add('is-open');
+    }
     syncTitle();
   }
 
@@ -1690,6 +1769,15 @@
     };
   }
 
+  function stickDead() { return Math.max(24, W * 0.018); }
+  function stickSwipe() { return Math.max(48, W * 0.032); }
+  function stickJump() { return Math.max(56, H * 0.08); }
+
+  function tryLandscape() {
+    const o = screen.orientation;
+    if (o && o.lock) o.lock('landscape').catch(() => {});
+  }
+
   function tapOnWanted(sx, sy) {
     if (netReady || board.open) return false;
     const w = screenToWorld(sx, sy);
@@ -1702,51 +1790,56 @@
     mouse.y = sy;
     if (!me) return;
     const ax = sx + camX, ay = sy;
-    if (ax > me.x + 6) me.facing = 1;
-    else if (ax < me.x - 6) me.facing = -1;
+    if (!(usingTouch && stick.id != null && moveDir() !== 0)) {
+      if (ax > me.x + 6) me.facing = 1;
+      else if (ax < me.x - 6) me.facing = -1;
+    }
     if (me.shoulder) me.aim = aimRotation(me.shoulder.x, me.shoulder.y, me.facing, ax, ay);
   }
 
   function endStick(e) {
     if (stick.id == null || e.pointerId !== stick.id) return;
+    const p = e.clientX != null ? evtXY(e) : { x: stick.x, y: stick.y };
     const dt = (performance.now() - stick.t0) / 1000;
-    const dx = (e.clientX != null ? e.clientX : stick.x) - stick.x0;
-    const dy = (e.clientY != null ? e.clientY : stick.y) - stick.y0;
+    const dx = p.x - stick.x0;
+    const dy = p.y - stick.y0;
     const dist = Math.hypot(dx, dy);
     stick.id = null;
     if (!me) return;
-    if (dist < 22 && dt < 0.32 && !netReady && board.near) {
+    if (dist < stickDead() && dt < 0.32 && !netReady && board.near) {
       openWantedMenu();
       return;
     }
     if (locked()) return;
-    if (dt < 0.28 && dist > 40) {
-      if (dy < -40 && -dy >= Math.abs(dx) * 0.62) me.jumpQueued = 0.12;
-      else if (Math.abs(dx) > 26) startDodge(me, dx > 0 ? 1 : -1);
-      else if (dy < -28) me.jumpQueued = 0.12;
+    const sw = stickSwipe(), jp = stickJump();
+    if (dt < 0.3 && dist > sw * 0.85) {
+      if (dy < -jp && -dy >= Math.abs(dx) * 0.62) me.jumpQueued = 0.12;
+      else if (Math.abs(dx) > sw * 0.7) startDodge(me, dx > 0 ? 1 : -1);
+      else if (dy < -jp * 0.7) me.jumpQueued = 0.12;
     }
   }
 
   cvs.addEventListener('pointerdown', e => {
     if (e.pointerType === 'touch' || e.pointerType === 'pen') {
       usingTouch = true;
+      tryLandscape();
       if (board.open || drafting()) return;
       e.preventDefault();
-      const x = e.clientX, y = e.clientY;
-      if (x < W * 0.5 && stick.id == null) {
+      const p = evtXY(e);
+      if (p.x < W * 0.5 && stick.id == null) {
         stick.id = e.pointerId;
-        stick.x0 = stick.x = x;
-        stick.y0 = stick.y = y;
+        stick.x0 = stick.x = p.x;
+        stick.y0 = stick.y = p.y;
         stick.t0 = performance.now();
         stick.jumped = false;
         try { cvs.setPointerCapture(e.pointerId); } catch (err) {}
         return;
       }
-      if (x >= W * 0.5 && firePtr.id == null) {
+      if (p.x >= W * 0.5 && firePtr.id == null) {
         firePtr.id = e.pointerId;
-        snapAim(x, y);
+        snapAim(p.x, p.y);
         try { cvs.setPointerCapture(e.pointerId); } catch (err) {}
-        if (!netReady && (board.near && tapOnWanted(x, y))) {
+        if (!netReady && (board.near && tapOnWanted(p.x, p.y))) {
           openWantedMenu();
           return;
         }
@@ -1756,32 +1849,34 @@
     }
     usingTouch = false;
     if (e.button === 0) {
+      const p = evtXY(e);
       mouse.down = true;
-      mouse.x = e.clientX;
-      mouse.y = e.clientY;
+      mouse.x = p.x;
+      mouse.y = p.y;
       if (me && !board.open && !locked()) tryFire(me);
     }
   }, { passive: false });
 
   cvs.addEventListener('pointermove', e => {
+    const p = evtXY(e);
     if (e.pointerType === 'touch' || e.pointerType === 'pen') {
       if (e.pointerId === firePtr.id) {
-        snapAim(e.clientX, e.clientY);
+        snapAim(p.x, p.y);
         return;
       }
       if (e.pointerId !== stick.id) return;
       e.preventDefault();
-      stick.x = e.clientX;
-      stick.y = e.clientY;
+      stick.x = p.x;
+      stick.y = p.y;
       const dx = stick.x - stick.x0, dy = stick.y - stick.y0;
-      if (!stick.jumped && dy < -72 && -dy > Math.abs(dx) * 0.75) {
+      if (!stick.jumped && dy < -stickJump() && -dy > Math.abs(dx) * 0.75) {
         stick.jumped = true;
         if (me && !locked()) me.jumpQueued = 0.12;
       }
       return;
     }
-    mouse.x = e.clientX;
-    mouse.y = e.clientY;
+    mouse.x = p.x;
+    mouse.y = p.y;
   }, { passive: false });
 
   function onPtrEnd(e) {
@@ -1798,14 +1893,19 @@
     if (k) return k;
     if (stick.id != null) {
       const dx = stick.x - stick.x0;
-      if (dx > 22) return 1;
-      if (dx < -22) return -1;
+      const dead = stickDead();
+      if (dx > dead) return 1;
+      if (dx < -dead) return -1;
     }
     return 0;
   }
 
   function playAim() {
     if (usingTouch && firePtr.id != null) return { x: mouse.x + camX, y: mouse.y };
+    if (usingTouch && stick.id != null && me) {
+      const d = moveDir() || me.facing;
+      return { x: me.x + d * 90, y: me.y - BODY_H * 0.45 };
+    }
     if (usingTouch && other && netReady) return { x: other.x, y: other.y - BODY_H * 0.55 };
     return { x: mouse.x + camX, y: mouse.y };
   }
@@ -2384,10 +2484,13 @@
       pl.vx = pl.dodgeDir * lawDodgeSpeed() * lerp(0.35, 1, pl.dodgeT / DODGE_TIME);
       if (pl.dodgeT <= 0) { pl.dodgeT = 0; pl.hatT = 0.5; }
     } else {
-      // 조준점 방향 우선, 캐릭터 근처(데드존)일 때만 이동 방향으로 돌아섬
-      if (input.aimX > pl.x + 6) pl.facing = 1;
-      else if (input.aimX < pl.x - 6) pl.facing = -1;
-      else if (dir !== 0) pl.facing = dir;
+      if (usingTouch && stick.id != null && dir !== 0) {
+        pl.facing = dir;
+      } else if (!(usingTouch && stick.id != null)) {
+        if (input.aimX > pl.x + 6) pl.facing = 1;
+        else if (input.aimX < pl.x - 6) pl.facing = -1;
+        else if (dir !== 0) pl.facing = dir;
+      }
       const backing = dir !== 0 && dir !== pl.facing;
       const walk = backing || pl.reloadT > 0;
       const speed = lawRun();
@@ -2767,7 +2870,7 @@
     if (S.viewFade != null) alpha *= S.viewFade;
     if (S.anim === 'dodge') {
       alpha *= 0.75;
-      ctx.filter = 'blur(0.8px)';
+      if (!isLoFi()) ctx.filter = 'blur(0.8px)';
     }
     ctx.globalAlpha *= alpha;
     ctx.translate(S.x + rx, S.y + ry);
@@ -3207,10 +3310,7 @@
       const y = H - 16 - ammoH / 2;
       ctx.save();
       if (i < shown) ctx.globalAlpha = 1;
-      else {
-        ctx.filter = 'grayscale(1)';
-        ctx.globalAlpha = 0.2;
-      }
+      else ctx.globalAlpha = 0.22;
       if (im && im.width) ctx.drawImage(im, x - ammoW / 2, y - ammoH / 2, ammoW, ammoH);
       ctx.restore();
     }
@@ -3284,6 +3384,8 @@
   function loop(now) {
     const t = now / 1000;
     ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = isLoFi() ? 'low' : 'high';
     if (PREVIEW) {
       drawPreview(t);
       requestAnimationFrame(loop);
