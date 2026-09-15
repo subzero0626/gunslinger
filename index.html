@@ -2,13 +2,38 @@
 <html lang="ko">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
 <title>Gunslinger</title>
 <script src="https://cdn.tailwindcss.com"></script>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/sweetalert2@11/dist/sweetalert2.min.css">
 <style>
-  html, body { margin: 0; height: 100%; overflow: hidden; background: #1c1618; }
-  canvas { display: block; cursor: none; }
+  html, body {
+    margin: 0; height: 100%; height: 100dvh; width: 100%;
+    overflow: hidden; background: #1c1618;
+    position: fixed; inset: 0;
+    touch-action: none;
+    overscroll-behavior: none;
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
+  }
+  input, textarea {
+    -webkit-user-select: text;
+    user-select: text;
+    touch-action: manipulation;
+  }
+  canvas { display: block; cursor: none; touch-action: none; }
+  #wipeLayer {
+    position: fixed;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    z-index: 20000;
+    pointer-events: none;
+  }
+  #wipeLayer.is-on { pointer-events: auto; cursor: none; }
 
   .swal2-container { cursor: default; }
   .swal-wanted {
@@ -73,6 +98,272 @@
   }
   .swal-wanted .swal2-timer-progress-bar {
     background: rgba(110,40,28,0.45) !important;
+  }
+
+  .law-pins {
+    display: flex;
+    gap: 6px;
+    align-items: flex-start;
+    min-height: 46px;
+  }
+  .law-pins[data-side="guest"] { flex-direction: row-reverse; }
+  .law-pin {
+    width: 46px;
+    cursor: default;
+    transition: opacity 0.25s;
+  }
+  .law-pin img {
+    display: block;
+    width: 100%;
+    border-radius: 5px;
+    box-shadow: 3px 4px 0 rgba(20,10,6,0.4);
+  }
+  .law-pin.is-await img {
+    opacity: 0;
+    box-shadow: none;
+  }
+  .law-tip {
+    display: none;
+    position: absolute;
+    top: calc(100% + 8px);
+    width: 168px;
+    padding: 8px 10px;
+    font: 12px/1.4 "Palatino Linotype", "Book Antiqua", "Malgun Gothic", serif;
+    color: #f0d9ae;
+    text-align: left;
+    background: rgba(20, 12, 10, 0.88);
+    box-shadow: 3px 4px 0 rgba(20,10,6,0.35);
+  }
+  .law-pins[data-side="host"] .law-tip { left: 0; }
+  .law-pins[data-side="guest"] .law-tip { right: 0; left: auto; }
+  .law-pin:hover .law-tip { display: block; }
+  .law-pin.is-off { display: none; }
+
+  .series-marks {
+    position: absolute;
+    left: 50%;
+    top: 2px;
+    display: flex;
+    align-items: center;
+    gap: 1px;
+    margin: 0;
+    transform: translateX(-50%);
+  }
+  .gem {
+    display: block;
+    width: 26px;
+    height: auto;
+    opacity: 0.22;
+    filter: grayscale(1);
+    transform-origin: 50% 70%;
+  }
+  .gem.on {
+    opacity: 1;
+    filter: brightness(0.78);
+  }
+  .gem.on.is-stamp {
+    animation: gemStamp 0.78s cubic-bezier(0.15, 0.85, 0.25, 1) both;
+  }
+  .gem-mid.is-stamp {
+    animation: gemStampMove 0.78s cubic-bezier(0.15, 0.85, 0.25, 1) both;
+  }
+  @keyframes gemStamp {
+    0% {
+      transform: translateY(-34px) scale(1.7);
+      filter: brightness(1.55) saturate(1.15);
+      opacity: 0;
+    }
+    38% {
+      transform: translateY(4px) scale(0.78, 1.22);
+      filter: brightness(1.25);
+      opacity: 1;
+    }
+    58% {
+      transform: translateY(-7px) scale(1.18, 0.88);
+      filter: brightness(1.05);
+    }
+    78% {
+      transform: translateY(2px) scale(0.94, 1.06);
+      filter: brightness(0.86);
+    }
+    100% {
+      transform: none;
+      filter: brightness(0.78);
+      opacity: 1;
+    }
+  }
+  @keyframes gemStampMove {
+    0% { transform: translateY(-34px) scale(1.7); opacity: 0; }
+    38% { transform: translateY(4px) scale(0.78, 1.22); opacity: 1; }
+    58% { transform: translateY(-7px) scale(1.18, 0.88); }
+    78% { transform: translateY(2px) scale(0.94, 1.06); }
+    100% { transform: none; opacity: 1; }
+  }
+  .gem-mid {
+    display: grid;
+    width: 38px;
+    opacity: 1;
+    filter: none;
+    transform-origin: 50% 70%;
+  }
+  .gem-mid img {
+    grid-area: 1 / 1;
+    width: 38px;
+    height: auto;
+    display: block;
+    opacity: 0.22;
+    filter: grayscale(1);
+  }
+  .gem-mid .gem-guest { opacity: 0; }
+  .gem-mid.on-host .gem-host {
+    opacity: 1;
+    filter: brightness(0.78);
+  }
+  .gem-mid.on-guest .gem-host { opacity: 0; }
+  .gem-mid.on-guest .gem-guest {
+    opacity: 1;
+    filter: brightness(0.78);
+  }
+
+  .card-slot { overflow: visible; }
+  .card-text {
+    position: absolute;
+    left: 15%;
+    right: 15%;
+    top: 62%;
+    bottom: auto;
+    text-align: center;
+    font-family: "Palatino Linotype", "Book Antiqua", "Malgun Gothic", serif;
+    font-size: 11.5px;
+    font-style: italic;
+    line-height: 1.5;
+    letter-spacing: 0.03em;
+    color: #dcc8a0;
+    text-shadow: 0 1px 0 rgba(12, 6, 2, 0.65);
+    pointer-events: none;
+  }
+
+  #draftTable { cursor: default; }
+  .draft-card {
+    transition: transform 0.2s ease, filter 0.2s ease, opacity 0.2s ease;
+  }
+  .draft-card.tilt-l { transform: rotate(-11deg) translateY(2rem); }
+  .draft-card.tilt-c { transform: none; }
+  .draft-card.tilt-r { transform: rotate(11deg) translateY(2rem); }
+  .draft-card.is-enter {
+    pointer-events: none;
+    transition: none;
+  }
+  .draft-card.is-enter.tilt-l {
+    animation: cardRiseL 0.62s cubic-bezier(0.2, 0.88, 0.22, 1) both;
+  }
+  .draft-card.is-enter.tilt-c {
+    animation: cardRiseC 0.62s cubic-bezier(0.2, 0.88, 0.22, 1) both;
+  }
+  .draft-card.is-enter.tilt-r {
+    animation: cardRiseR 0.62s cubic-bezier(0.2, 0.88, 0.22, 1) both;
+  }
+  .draft-card.is-enter.is-fate {
+    animation: cardRiseC 0.62s cubic-bezier(0.2, 0.88, 0.22, 1) both;
+  }
+  @keyframes cardRiseL {
+    from { opacity: 0; transform: rotate(-11deg) translateY(calc(2rem + 48vh)); }
+    to { opacity: 1; transform: rotate(-11deg) translateY(2rem); }
+  }
+  @keyframes cardRiseC {
+    from { opacity: 0; transform: translateY(48vh); }
+    to { opacity: 1; transform: none; }
+  }
+  @keyframes cardRiseR {
+    from { opacity: 0; transform: rotate(11deg) translateY(calc(2rem + 48vh)); }
+    to { opacity: 1; transform: rotate(11deg) translateY(2rem); }
+  }
+  .draft-card.is-hover:not(.is-burnt):not(.is-enter) {
+    z-index: 6;
+    filter: brightness(1.1);
+  }
+  .draft-card.tilt-l.is-hover:not(.is-burnt):not(.is-enter) {
+    transform: rotate(-11deg) translateY(calc(2rem - 16px)) scale(1.07);
+  }
+  .draft-card.tilt-c.is-hover:not(.is-burnt):not(.is-enter) {
+    transform: translateY(-16px) scale(1.07);
+  }
+  .draft-card.tilt-r.is-hover:not(.is-burnt):not(.is-enter) {
+    transform: rotate(11deg) translateY(calc(2rem - 16px)) scale(1.07);
+  }
+  #draftTable:not(.is-wait) .draft-card.is-hover:not(.is-burnt) { cursor: pointer; }
+  .draft-card.is-fate { pointer-events: none; cursor: default; }
+
+  #draftHint {
+    transition: color 0.2s ease, opacity 0.2s ease;
+  }
+  #draftTable.is-wait #draftHint {
+    color: rgba(240, 217, 174, 0.55);
+  }
+  #draftTable.is-wait:not(.is-reveal):not(.is-rising) .draft-card:not(.is-burnt):not(.is-fate):not(.is-enter) {
+    opacity: 0.72;
+    filter: brightness(0.9);
+  }
+  #draftTable {
+    transition: background-color 0.45s ease;
+    overflow: visible;
+  }
+  #draftTable.is-fly {
+    background-color: transparent !important;
+  }
+  #draftTable.is-fly #draftHint { opacity: 0; }
+
+  .hud-gauge .gauge-svg {
+    display: block;
+    width: 100%;
+    height: 14px;
+    overflow: visible;
+    filter: drop-shadow(2px 2px 0 rgba(20, 10, 6, 0.28));
+  }
+  .hud-gauge .gauge-bed { fill: rgba(20, 10, 6, 0.48); }
+  .hud-gauge .gauge-ink {
+    fill: none;
+    stroke: rgba(40, 22, 16, 0.82);
+    stroke-width: 1.55;
+    stroke-linejoin: round;
+    stroke-linecap: round;
+  }
+  .hud-gauge .gauge-ink-soft {
+    fill: none;
+    stroke: rgba(40, 22, 16, 0.28);
+    stroke-width: 1.05;
+    stroke-linejoin: round;
+    stroke-linecap: round;
+  }
+  .hud-gauge-fill {
+    transform-origin: left center;
+    transform-box: fill-box;
+    fill: url(#gaugeWash);
+    transition: filter 0.2s ease, opacity 0.2s ease;
+  }
+  #startGauge {
+    position: fixed;
+    left: 50%;
+    bottom: 36px;
+    z-index: 45;
+    width: min(280px, 70vw);
+    transform: translateX(-50%);
+    pointer-events: none;
+  }
+  #startGauge.hidden { display: none; }
+  #startGauge.is-wait .hud-gauge-fill {
+    opacity: 0.45;
+    filter: grayscale(0.55);
+  }
+
+  #lawCard {
+    opacity: 0;
+    transform: translate(-50%, 58vh) scale(0.96);
+    transition: opacity 0.38s ease, transform 0.68s cubic-bezier(0.2, 0.88, 0.22, 1);
+  }
+  #lawCard.is-up {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
   }
 
   #wantedStatus {
@@ -142,33 +433,438 @@
   .swal-wanted.swal2-hide {
     animation: swal2-hide 0.15s forwards !important;
   }
+
+  #wantedBoard {
+    position: fixed;
+    inset: 0;
+    z-index: 35;
+    display: none;
+    pointer-events: auto;
+    cursor: default;
+  }
+  #wantedBoard.is-on { display: block; }
+  #wantedBoard .wanted-dim {
+    position: absolute;
+    inset: 0;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    cursor: pointer;
+  }
+  #wantedBoard .wanted-stage {
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    pointer-events: none;
+  }
+  #wantedBoard .wanted-sheet {
+    position: absolute;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+    padding: 0 8% 14%;
+    background: transparent;
+    border: 0;
+    cursor: pointer;
+    pointer-events: none;
+    transform-origin: center center;
+    overflow: visible;
+  }
+  #wantedBoard.is-ready .wanted-sheet { pointer-events: auto; z-index: 2; }
+  #wantedBoard .wanted-blank {
+    position: absolute;
+    z-index: 1;
+    opacity: 0;
+    pointer-events: none;
+    user-select: none;
+    object-fit: fill;
+    transition: opacity 0.18s ease;
+  }
+  #wantedBoard.is-ready:has(.wanted-sheet[data-sheet="multi"]:hover) .wanted-blank[data-blank="multi"],
+  #wantedBoard.is-ready:has(.wanted-sheet[data-sheet="multi"].is-open) .wanted-blank[data-blank="multi"],
+  #wantedBoard.is-ready.is-hosting .wanted-blank[data-blank="multi"],
+  #wantedBoard.is-ready.is-joining .wanted-blank[data-blank="multi"],
+  #wantedBoard.is-ready.is-seeking .wanted-blank[data-blank="multi"],
+  #wantedBoard.is-ready:has(.wanted-sheet[data-sheet="ai"]:hover) .wanted-blank[data-blank="ai"],
+  #wantedBoard.is-ready:has(.wanted-sheet[data-sheet="ai"].is-open) .wanted-blank[data-blank="ai"],
+  #wantedBoard.is-ready:has(.wanted-sheet[data-sheet="train"]:hover) .wanted-blank[data-blank="train"],
+  #wantedBoard.is-ready:has(.wanted-sheet[data-sheet="train"].is-open) .wanted-blank[data-blank="train"] {
+    opacity: 1;
+  }
+  #wantedBoard .wanted-acts,
+  #wantedBoard .wanted-wait,
+  #wantedBoard .wanted-join,
+  #wantedBoard .wanted-seek {
+    position: relative;
+    z-index: 1;
+    opacity: 0;
+    pointer-events: none;
+    transform: translateY(8px);
+    transition: opacity 0.2s ease, transform 0.2s ease;
+  }
+  #wantedBoard .wanted-notice,
+  #wantedBoard .wanted-hint {
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.22s ease;
+  }
+  #wantedBoard.is-ready .wanted-sheet:hover .wanted-acts,
+  #wantedBoard.is-ready .wanted-sheet.is-open .wanted-acts,
+  #wantedBoard.is-ready .wanted-sheet:hover .wanted-wait,
+  #wantedBoard.is-ready .wanted-sheet.is-open .wanted-wait,
+  #wantedBoard.is-ready.is-hosting .wanted-sheet.is-multi .wanted-wait,
+  #wantedBoard.is-ready.is-joining .wanted-sheet.is-multi .wanted-join,
+  #wantedBoard.is-ready.is-seeking .wanted-sheet.is-multi .wanted-seek {
+    opacity: 1;
+    pointer-events: auto;
+    transform: none;
+  }
+  #wantedBoard.is-ready .wanted-sheet:hover .wanted-notice.is-on,
+  #wantedBoard.is-ready .wanted-sheet.is-open .wanted-notice.is-on,
+  #wantedBoard.is-ready .wanted-hint {
+    opacity: 1;
+  }
+  #wantedBoard.is-ready .wanted-hint { pointer-events: none; }
+  #wantedBoard.is-hosting .wanted-acts,
+  #wantedBoard.is-joining .wanted-acts,
+  #wantedBoard.is-seeking .wanted-acts { display: none; }
+  #wantedBoard .wanted-wait,
+  #wantedBoard .wanted-join,
+  #wantedBoard .wanted-seek { display: none; }
+  #wantedBoard.is-hosting .wanted-wait { display: flex; }
+  #wantedBoard.is-joining .wanted-join { display: flex; }
+  #wantedBoard.is-seeking .wanted-seek { display: flex; }
+  #wantedBoard .wanted-acts {
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-end;
+    gap: 10px;
+    width: 100%;
+  }
+  #wantedBoard .wanted-mode {
+    position: absolute;
+    z-index: 1;
+    top: 13%;
+    left: 11%;
+    margin: 0;
+    padding: 0 0 4px;
+    opacity: 0;
+    pointer-events: none;
+    white-space: nowrap;
+    font: 700 10px/1 "Palatino Linotype", "Book Antiqua", "Malgun Gothic", serif;
+    letter-spacing: 0.22em;
+    color: #7a3324;
+    text-shadow: 0 1px 0 rgba(255,244,220,0.55);
+    border-bottom: 1px solid rgba(110, 40, 28, 0.35);
+    transition: opacity 0.18s ease;
+  }
+  #wantedBoard.is-ready .wanted-sheet:hover .wanted-mode,
+  #wantedBoard.is-ready .wanted-sheet.is-open .wanted-mode,
+  #wantedBoard.is-ready.is-hosting .wanted-sheet.is-multi .wanted-mode,
+  #wantedBoard.is-ready.is-joining .wanted-sheet.is-multi .wanted-mode,
+  #wantedBoard.is-ready.is-seeking .wanted-sheet.is-multi .wanted-mode {
+    opacity: 0.92;
+  }
+  #wantedBoard .wanted-acts button,
+  #wantedBoard .wanted-wait button,
+  #wantedBoard .wanted-join button,
+  #wantedBoard .wanted-seek button {
+    display: block;
+    width: 100%;
+    height: auto;
+    flex: none;
+    padding: 13px 12px 14px;
+    border: 0;
+    cursor: pointer;
+    white-space: nowrap;
+    font: 700 15px/1.2 "Palatino Linotype", "Book Antiqua", "Malgun Gothic", serif;
+    letter-spacing: 0.06em;
+    color: #5c1e14;
+    text-shadow: 0 1px 0 rgba(255,248,230,0.85);
+    background:
+      radial-gradient(ellipse at 18% 12%, rgba(255,252,240,0.7), transparent 48%),
+      linear-gradient(165deg, #f3e2c0 0%, #e6c894 52%, #d7b57a 100%);
+    box-shadow:
+      3px 4px 0 rgba(20,10,6,0.4),
+      inset 0 0 0 1px rgba(90,55,35,0.28);
+    clip-path: polygon(1.5% 0, 98% 2%, 100% 14%, 97% 100%, 4% 98%, 0 84%);
+  }
+  #wantedBoard .wanted-acts button.join {
+    color: #3d2218;
+    clip-path: polygon(0 6%, 97% 0, 100% 86%, 94% 100%, 2% 97%, 1% 12%);
+  }
+  #wantedBoard .wanted-acts button:hover,
+  #wantedBoard .wanted-wait button:hover,
+  #wantedBoard .wanted-join button:hover,
+  #wantedBoard .wanted-seek button:hover { filter: brightness(1.08); }
+  #wantedBoard .wanted-sheet.is-multi {
+    justify-content: stretch;
+    align-items: stretch;
+    padding: 0;
+    overflow: visible;
+  }
+  #wantedBoard .wanted-sheet.is-multi .wanted-acts {
+    position: absolute;
+    left: 12%;
+    right: 12%;
+    top: 30%;
+    bottom: 14%;
+    z-index: 2;
+    width: auto;
+    flex: none;
+    justify-content: space-between;
+    gap: 18px;
+    padding: 0;
+    transform: none;
+  }
+  #wantedBoard .wanted-sheet.is-multi .wanted-acts button {
+    flex: none;
+    width: 100%;
+    min-height: 0;
+    padding: 10px 8px 11px;
+    font-size: 16px;
+    font-weight: 800;
+    letter-spacing: 0.14em;
+    color: #f3e2c4;
+    text-shadow: 0 1px 0 rgba(20, 8, 4, 0.45);
+    background:
+      radial-gradient(ellipse at 18% 8%, rgba(255, 214, 170, 0.22), transparent 52%),
+      linear-gradient(175deg, #9a3a28 0%, #6e2218 48%, #4e1610 100%);
+    box-shadow:
+      3px 4px 0 rgba(28, 10, 6, 0.5),
+      inset 0 1px 0 rgba(255, 226, 190, 0.22),
+      inset 0 -2px 0 rgba(20, 6, 4, 0.25);
+    clip-path: polygon(2% 6%, 6% 0, 97% 3%, 100% 16%, 98% 94%, 92% 100%, 3% 97%, 0 82%);
+  }
+  #wantedBoard .wanted-sheet.is-multi .wanted-acts button.join {
+    color: #f0e6d2;
+    background:
+      radial-gradient(ellipse at 80% 12%, rgba(255, 220, 180, 0.18), transparent 48%),
+      linear-gradient(175deg, #6a4a32 0%, #4a3224 52%, #352218 100%);
+    clip-path: polygon(0 10%, 8% 0, 100% 4%, 98% 88%, 90% 100%, 2% 96%, 1% 18%);
+  }
+  #wantedBoard .wanted-sheet.is-multi .wanted-acts button:hover {
+    filter: brightness(1.12);
+  }
+  #wantedBoard .wanted-sheet.is-multi .wanted-wait,
+  #wantedBoard .wanted-sheet.is-multi .wanted-join,
+  #wantedBoard .wanted-sheet.is-multi .wanted-seek {
+    position: absolute;
+    left: 10%;
+    right: 10%;
+    top: 28%;
+    bottom: 12%;
+    z-index: 2;
+    width: auto;
+    flex: none;
+    justify-content: center;
+    padding: 0;
+    transform: none;
+    color: #6e281c;
+  }
+  #wantedBoard .wanted-join {
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+    text-align: center;
+    font-family: "Palatino Linotype", "Book Antiqua", "Malgun Gothic", serif;
+  }
+  #wantedBoard .wanted-join-input {
+    display: block;
+    width: 100%;
+    margin: 4px 0 2px;
+    padding: 6px 4px 8px;
+    border: 0;
+    border-bottom: 2px dashed rgba(70, 42, 28, 0.4);
+    border-radius: 0;
+    background: transparent;
+    color: #6e281c;
+    text-align: center;
+    font: 700 28px/1.1 "Palatino Linotype", "Book Antiqua", "Malgun Gothic", serif;
+    letter-spacing: 0.32em;
+    outline: none;
+  }
+  #wantedBoard .wanted-join-input::placeholder {
+    color: rgba(110, 40, 28, 0.28);
+    letter-spacing: 0.32em;
+  }
+  #wantedBoard .wanted-join-input:focus {
+    border-bottom-color: #6e281c;
+  }
+  #wantedBoard .wanted-sheet.is-multi .wanted-wait button,
+  #wantedBoard .wanted-sheet.is-multi .wanted-join button,
+  #wantedBoard .wanted-sheet.is-multi .wanted-seek button {
+    color: #f3e2c4;
+    background:
+      linear-gradient(175deg, #7a3224 0%, #531810 100%);
+    box-shadow: 2px 3px 0 rgba(28, 10, 6, 0.4);
+    clip-path: polygon(2% 0, 98% 4%, 100% 90%, 94% 100%, 3% 96%, 0 12%);
+  }
+  #wantedBoard .wanted-wait,
+  #wantedBoard .wanted-seek {
+    flex-direction: column;
+    align-items: center;
+    gap: 1px;
+    width: 100%;
+    color: #6e281c;
+    text-align: center;
+    font-family: "Palatino Linotype", "Book Antiqua", "Malgun Gothic", serif;
+    text-shadow: 0 1px 0 rgba(255,248,230,0.65);
+  }
+  #wantedBoard .wanted-wait-label {
+    margin: 0;
+    font-size: 10px;
+    letter-spacing: 0.2em;
+    opacity: 0.8;
+  }
+  #wantedBoard .wanted-wait-code {
+    margin: 2px 0 0;
+    font-size: 26px;
+    font-weight: 700;
+    letter-spacing: 0.28em;
+    line-height: 1.1;
+  }
+  #wantedBoard .wanted-wait-sub {
+    margin: 2px 0 7px;
+    font-size: 10px;
+    letter-spacing: 0.06em;
+    opacity: 0.72;
+  }
+  #wantedBoard .wanted-notice {
+    position: relative;
+    z-index: 1;
+    margin: 0 4% 0;
+    padding: 10px 10px 11px;
+    font: 700 11px/1.35 "Palatino Linotype", "Book Antiqua", "Malgun Gothic", serif;
+    letter-spacing: 0.04em;
+    color: #6e281c;
+    text-align: center;
+    text-shadow: 0 1px 0 rgba(255,248,230,0.7);
+    background:
+      radial-gradient(ellipse at 18% 12%, rgba(255,250,235,0.5), transparent 48%),
+      linear-gradient(165deg, #ead6b4 0%, #dfc49a 52%, #d2b486 100%);
+    box-shadow: 2px 3px 0 rgba(20,10,6,0.32);
+    clip-path: polygon(2% 0, 98% 3%, 100% 90%, 95% 100%, 3% 97%, 0 12%);
+  }
+  #wantedBoard .wanted-hint {
+    position: absolute;
+    margin: 0;
+    font: 11px/1.3 "Palatino Linotype", "Book Antiqua", "Malgun Gothic", serif;
+    letter-spacing: 0.12em;
+    color: rgba(244, 230, 208, 0.82);
+    text-shadow: 0 1px 2px rgba(0,0,0,0.55);
+    white-space: nowrap;
+    transform: translate(-50%, -50%);
+  }
+  #wantedBoard .wanted-dim { pointer-events: none; }
+  #wantedBoard.is-ready .wanted-dim { pointer-events: auto; }
+
+
 </style>
 </head>
 <body>
 <div id="wantedStatus"></div>
-<div id="titleCard" class="pointer-events-none fixed left-1/2 top-7 z-20 -translate-x-1/2 text-center transition-opacity duration-500">
-  <h1 class="m-0 font-serif text-[40px] font-bold leading-none tracking-[0.28em] text-[#f7e2b8] drop-shadow-[3px_4px_0_rgba(20,10,6,0.6)]">GUNSLINGER</h1>
-  <div class="mx-auto mt-2 h-px w-40 bg-[#f0d9ae]/40"></div>
-  <p class="mt-2 font-serif text-[12px] tracking-[0.14em] text-[#f0d9ae]/75">현상수배 게시판으로 가서 <span class="font-bold text-[#ffd27a]">E</span></p>
+<div id="wantedBoard">
+  <button type="button" class="wanted-dim" aria-label="닫기"></button>
+  <div class="wanted-stage">
+    <img class="wanted-blank" data-blank="multi" src="assets/blank-multi.png?v=4" alt="" draggable="false">
+    <img class="wanted-blank" data-blank="ai" src="assets/blank-ai.png?v=4" alt="" draggable="false">
+    <img class="wanted-blank" data-blank="train" src="assets/blank-train.png?v=4" alt="" draggable="false">
+    <div class="wanted-sheet is-multi" data-sheet="multi">
+      <p class="wanted-mode">멀티플레이</p>
+      <div class="wanted-acts">
+        <button type="button" data-act="host">방 만들기</button>
+        <button type="button" class="join" data-act="join">방 입장</button>
+      </div>
+      <div class="wanted-wait">
+        <p class="wanted-wait-label">수배 번호</p>
+        <p class="wanted-wait-code" id="wantedCode"></p>
+        <p class="wanted-wait-sub">현상금 사냥꾼 대기 중</p>
+        <button type="button" data-act="cancel">거두기</button>
+      </div>
+      <div class="wanted-join">
+        <p class="wanted-wait-label">수배 번호</p>
+        <input id="wantedJoinCode" class="wanted-join-input" type="text" maxlength="4" inputmode="numeric" pattern="[0-9]*" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="0000">
+        <p class="wanted-wait-sub">4자리를 입력하면 들어갑니다</p>
+        <button type="button" data-act="join-back">뒤로</button>
+      </div>
+      <div class="wanted-seek">
+        <p class="wanted-wait-label">수배 번호</p>
+        <p class="wanted-wait-code" id="wantedSeekCode"></p>
+        <p class="wanted-wait-sub" id="wantedSeekSub">연결 중…</p>
+        <button type="button" data-act="join-cancel">그만두기</button>
+      </div>
+    </div>
+    <div class="wanted-sheet" data-sheet="ai">
+      <div class="wanted-acts">
+        <button type="button" data-act="ai">현상금</button>
+      </div>
+      <p id="wantedNotice" class="wanted-notice"></p>
+    </div>
+    <div class="wanted-sheet" data-sheet="train">
+      <div class="wanted-acts">
+        <button type="button" data-act="train">연습</button>
+      </div>
+    </div>
+    <p class="wanted-hint">Esc / 바깥 터치로 닫기</p>
+  </div>
 </div>
-<div id="lawCard" class="pointer-events-none fixed left-1/2 top-[46%] z-30 w-[210px] -translate-x-1/2 -translate-y-1/2 -rotate-2 scale-90 opacity-0 transition duration-300">
-  <div class="relative flex h-[330px] w-[210px] flex-col rounded-[14px] border-[3px] border-[#6e281c]/70 bg-gradient-to-br from-[#f6e6c4] via-[#ead6b4] to-[#d8b888] shadow-[5px_8px_0_rgba(20,10,6,0.4)]">
-    <div class="absolute inset-[7px] rounded-[8px] border border-[#6e281c]/25"></div>
-    <div class="absolute left-3 top-2.5 font-serif text-[10px] font-bold tracking-[0.22em] text-[#6e281c]/80">WANTED</div>
-    <div class="absolute right-3 top-2.5 font-serif text-lg leading-none text-[#8b2e1f]">♠</div>
-    <div id="lawIcon" class="absolute left-1/2 top-[37%] flex h-[82px] w-[82px] -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border-2 border-[#6e281c]/25 bg-[#fdf3dc]/50 p-3.5"></div>
-    <h2 class="absolute left-3 right-3 top-[58%] text-center font-serif text-[17px] font-bold tracking-wide text-[#6e281c]"></h2>
-    <p class="law-text absolute left-4 right-4 top-[70%] text-center font-serif text-[12px] leading-snug text-[#3d2a1c]/80"></p>
-    <div class="absolute bottom-2.5 left-3 rotate-180 font-serif text-lg leading-none text-[#8b2e1f]">♠</div>
-    <div class="absolute bottom-2.5 right-3 rotate-180 font-serif text-[10px] font-bold tracking-[0.22em] text-[#6e281c]/80">WANTED</div>
+<div id="titleCard" class="pointer-events-none hidden"></div>
+<div id="matchHud" class="pointer-events-none fixed inset-x-0 top-3 z-20 hidden items-start justify-between px-5">
+  <div class="law-pins" data-side="host"></div>
+  <div class="series-marks">
+    <img class="gem" data-slot="0" src="assets/ui/gem-red.png" alt="">
+    <img class="gem" data-slot="1" src="assets/ui/gem-red.png" alt="">
+    <span class="gem-mid" data-slot="2">
+      <img class="gem-host" src="assets/ui/gem-red.png" alt="">
+      <img class="gem-guest" src="assets/ui/gem-blue.png" alt="">
+    </span>
+    <img class="gem" data-slot="3" src="assets/ui/gem-blue.png" alt="">
+    <img class="gem" data-slot="4" src="assets/ui/gem-blue.png" alt="">
+  </div>
+  <div class="law-pins" data-side="guest"></div>
+</div>
+<div id="draftTable" class="pointer-events-none fixed inset-0 z-40 hidden flex-col items-center justify-center bg-[#140e0c]/55">
+  <p id="draftHint" class="mb-8 font-serif text-[15px] tracking-[0.18em] text-[#f0d9ae]">버릴 카드를 고르시오</p>
+  <div id="draftCards" class="flex items-start justify-center gap-4"></div>
+</div>
+<div id="lawCard" class="pointer-events-none fixed left-1/2 top-[46%] z-30 w-[220px]">
+  <div class="relative">
+    <img id="lawArt" alt="" class="block w-full rounded-[10px] shadow-[5px_8px_0_rgba(20,10,6,0.45)]">
+    <p class="law-text card-text"></p>
   </div>
 </div>
 <canvas id="game"></canvas>
+<canvas id="wipeLayer"></canvas>
+<div id="startGauge" class="hud-gauge hidden">
+  <svg class="gauge-svg" viewBox="0 0 280 20" aria-hidden="true">
+    <defs>
+      <linearGradient id="gaugeWash" x1="0" y1="0" x2="1" y2="0">
+        <stop offset="0%" stop-color="#c9a36a"/>
+        <stop offset="100%" stop-color="#f0d9ae"/>
+      </linearGradient>
+      <clipPath id="gaugeClip">
+        <path d="M7.2 4.1 C42 2.4 88 5.6 138 3.6 C188 1.7 236 5.2 272.4 3.9 C276.8 4.8 276.2 9.6 273.6 13.6 C236 16.8 186 14.4 138 16.4 C90 18.3 44 15.2 7.6 16.1 C3.4 14.6 3.6 7.2 7.2 4.1 Z"/>
+      </clipPath>
+    </defs>
+    <path class="gauge-bed" d="M7.2 4.1 C42 2.4 88 5.6 138 3.6 C188 1.7 236 5.2 272.4 3.9 C276.8 4.8 276.2 9.6 273.6 13.6 C236 16.8 186 14.4 138 16.4 C90 18.3 44 15.2 7.6 16.1 C3.4 14.6 3.6 7.2 7.2 4.1 Z"/>
+    <g clip-path="url(#gaugeClip)">
+      <rect id="startGaugeFill" class="hud-gauge-fill" x="4" y="1" width="272" height="18"/>
+    </g>
+    <path class="gauge-ink" d="M7.2 4.1 C42 2.4 88 5.6 138 3.6 C188 1.7 236 5.2 272.4 3.9 C276.8 4.8 276.2 9.6 273.6 13.6 C236 16.8 186 14.4 138 16.4 C90 18.3 44 15.2 7.6 16.1 C3.4 14.6 3.6 7.2 7.2 4.1 Z"/>
+    <path class="gauge-ink-soft" d="M8.1 3.5 C44 2.1 90 4.8 140 3.1 C192 1.4 238 4.6 272.8 3.3 C277.2 4.6 276.8 10.2 273.2 14.2 C235 17.4 184 15.1 136 16.9 C88 18.6 43 15.8 7.2 16.6"/>
+  </svg>
+</div>
 <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11/dist/sweetalert2.all.min.js"></script>
 <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
 <script src="assets-data.js"></script>
 <script src="props-data.js"></script>
 <script src="net.js"></script>
+<script src="maps-data.js"></script>
+<script src="obj-masks.js"></script>
 <script src="game.js"></script>
 </body>
 </html>

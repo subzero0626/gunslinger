@@ -184,11 +184,13 @@ function crop(s, pad = 3) {
   for (let y = 0; y < h; y++) {
     for (let x = 0; x < w; x++) {
       const si = at(x0 + x, y0 + y), di = (y * w + x) * 4;
-      buf[di] = data[si]; buf[di + 1] = data[si + 1]; buf[di + 2] = data[si + 2]; buf[di + 3] = 255;
+      buf[di] = data[si]; buf[di + 1] = data[si + 1]; buf[di + 2] = data[si + 2]; buf[di + 3] = data[si + 3];
     }
   }
   return { w, h, buf };
 }
+
+const HAS_ALPHA = data[at(3, 3) + 3] < 8;
 
 // 바깥에서 flood fill 로 종이 배경을 찾고, 경계는 종이색을 빼내(언멀티플라이) 흰 테두리를 없앤다
 function keyOut(im) {
@@ -409,7 +411,12 @@ NAMES.forEach(({ index, name, cutTop, unused }) => {
     s.x = x0; s.w = x1 - x0 + 1;
   }
   const im = crop(s);
-  keyOut(im);
+  if (HAS_ALPHA) {
+    // 시트에 이미 알파가 있으면 색 거리 누끼는 어두운 선을 먹어버린다
+    for (let i = 3; i < im.buf.length; i += 4) if (im.buf[i] < 8) im.buf[i] = 0;
+  } else {
+    keyOut(im);
+  }
   grade(im);
   const big = resample(im, SCALE);
   outline(big, OUTLINE, Math.max(1, Math.round(SCALE * 0.7)));

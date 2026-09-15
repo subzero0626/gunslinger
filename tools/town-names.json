@@ -1,16 +1,12 @@
 [
-  { "index": 2, "name": "shop" },
-  { "index": 4, "name": "inn" },
-  { "index": 5, "name": "smithy", "cutTop": 34 },
-  { "index": 6, "name": "church" },
-  { "index": 7, "name": "warehouse" },
-  { "index": 8, "name": "saloon" },
-  { "index": 9, "name": "house" },
+  { "index": 1, "name": "shop" },
+  { "index": 3, "name": "inn" },
+  { "index": 4, "name": "smithy" },
+  { "index": 5, "name": "church" },
+  { "index": 6, "name": "warehouse" },
+  { "index": 7, "name": "saloon" },
+  { "index": 8, "name": "house" },
 
-  { "index": 1, "name": "watertower", "unused": true },
-  { "index": 3, "name": "signboard", "unused": true },
-  { "index": 16, "name": "stairs", "unused": true },
-  { "index": 17, "name": "platform", "unused": true },
-  { "index": 18, "name": "ladder", "unused": true },
-  { "index": 19, "name": "scaffold", "unused": true }
+  { "index": 0, "name": "watertower", "unused": true },
+  { "index": 2, "name": "signboard", "unused": true }
 ]

@@ -5,6 +5,8 @@ window.GunNet = (() => {
   let peer = null, conn = null;
   let role = null; // 'host' | 'guest'
   let roomCode = '';
+  let joinTimer = null;
+  let gen = 0;
   let onStatus = () => {};
   let onReady = () => {};
   let onMessage = () => {};
@@ -36,13 +38,31 @@ window.GunNet = (() => {
     return NOT_FOUND;
   }
 
-  function wireConn(c) {
+  function live(g) {
+    return g === gen;
+  }
+
+  function teardown() {
+    gen += 1;
+    if (joinTimer) { clearTimeout(joinTimer); joinTimer = null; }
+    const oldConn = conn;
+    const oldPeer = peer;
+    conn = null;
+    peer = null;
+    role = null;
+    roomCode = '';
+    try { if (oldConn) oldConn.close(); } catch (_) {}
+    try { if (oldPeer) oldPeer.destroy(); } catch (_) {}
+  }
+
+  function wireConn(c, g) {
+    if (!live(g)) return;
     conn = c;
-    let joinTimer = null;
-    c.on('data', data => onMessage(data));
-    c.on('close', () => onStatus('연결 끊김'));
-    c.on('error', () => onStatus(NOT_FOUND));
+    c.on('data', data => { if (live(g)) onMessage(data); });
+    c.on('close', () => { if (live(g)) onStatus('연결 끊김'); });
+    c.on('error', () => { if (live(g)) onStatus(NOT_FOUND); });
     const ready = () => {
+      if (!live(g)) return;
       if (joinTimer) { clearTimeout(joinTimer); joinTimer = null; }
       onReady(role, roomCode);
     };
@@ -51,57 +71,67 @@ window.GunNet = (() => {
       c.on('open', ready);
       if (role === 'guest') {
         joinTimer = setTimeout(() => {
+          if (!live(g)) return;
           if (!conn || !conn.open) onStatus(NOT_FOUND);
         }, 4000);
       }
     }
   }
 
-  function host() {
-    role = 'host';
-    roomCode = makeCode();
-    onStatus('수배 게시 중…');
-    peer = new Peer(PREFIX + roomCode, { debug: 0 });
-    peer.on('open', id => {
+  function listenHost(p, g) {
+    p.on('open', id => {
+      if (!live(g) || peer !== p) return;
       roomCode = codeFromId(id) || roomCode;
       onStatus('수배 번호: ' + roomCode + '\n(현상금 사냥꾼 대기 중)');
     });
-    peer.on('connection', c => {
+    p.on('connection', c => {
+      if (!live(g) || peer !== p) return;
       onStatus('사냥꾼이 수락했습니다');
-      wireConn(c);
+      wireConn(c, g);
     });
-    peer.on('error', err => {
+    p.on('error', err => {
+      if (!live(g) || peer !== p) return;
       if (err && err.type === 'unavailable-id') {
-        try { peer.destroy(); } catch (_) {}
+        try { p.destroy(); } catch (_) {}
+        if (!live(g)) return;
         roomCode = makeCode();
+        onStatus('수배 번호를 다시 게시합니다…');
         peer = new Peer(PREFIX + roomCode, { debug: 0 });
-        peer.on('open', id => {
-          roomCode = codeFromId(id) || roomCode;
-          onStatus('수배 번호: ' + roomCode + '\n(현상금 사냥꾼 대기 중)');
-        });
-        peer.on('connection', c => {
-          onStatus('사냥꾼이 수락했습니다');
-          wireConn(c);
-        });
-        peer.on('error', () => onStatus(NOT_FOUND));
+        listenHost(peer, g);
         return;
       }
       onStatus(statusFromError(err));
     });
   }
 
+  function host() {
+    teardown();
+    role = 'host';
+    roomCode = makeCode();
+    const g = gen;
+    onStatus('수배 게시 중…');
+    peer = new Peer(PREFIX + roomCode, { debug: 0 });
+    listenHost(peer, g);
+  }
+
   function join(code) {
+    teardown();
     role = 'guest';
     roomCode = normalizeCode(code);
+    const g = gen;
     if (roomCode.length !== 4) { onStatus('숫자 4자리 수배 번호를 입력하세요'); return; }
-    onStatus('수배 확인 중…');
+    onStatus('연결 중…');
     peer = new Peer({ debug: 0 });
     peer.on('open', () => {
+      if (!live(g) || !peer) return;
       const c = peer.connect(PREFIX + roomCode, { reliable: true });
-      wireConn(c);
-      onStatus('현상금 수락 요청 중…');
+      wireConn(c, g);
+      onStatus('연결 중…');
     });
-    peer.on('error', err => onStatus(statusFromError(err)));
+    peer.on('error', err => {
+      if (!live(g)) return;
+      onStatus(statusFromError(err));
+    });
   }
 
   function send(data) {
@@ -109,12 +139,7 @@ window.GunNet = (() => {
   }
 
   function cancel() {
-    try { if (conn) conn.close(); } catch (_) {}
-    try { if (peer) peer.destroy(); } catch (_) {}
-    peer = null;
-    conn = null;
-    role = null;
-    roomCode = '';
+    teardown();
     onStatus('');
   }
 
