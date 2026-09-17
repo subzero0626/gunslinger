@@ -12,8 +12,6 @@
     return false;
   }
 
-  const DESIGN_W = 1600, DESIGN_H = 900;
-
   function placeLayer(el, cssW, cssH, left, top) {
     if (!el) return;
     el.style.position = 'fixed';
@@ -28,20 +26,9 @@
 
   function resize() {
     const mobile = isLoFi();
-    let cssW, cssH, left, top, gameW, gameH;
-    if (mobile) {
-      gameW = DESIGN_W;
-      gameH = DESIGN_H;
-      const fit = Math.min(innerWidth / gameW, innerHeight / gameH);
-      cssW = gameW * fit;
-      cssH = gameH * fit;
-      left = (innerWidth - cssW) * 0.5;
-      top = (innerHeight - cssH) * 0.5;
-    } else {
-      gameW = innerWidth;
-      gameH = innerHeight;
-      cssW = gameW; cssH = gameH; left = 0; top = 0;
-    }
+    const gameW = innerWidth;
+    const gameH = innerHeight;
+    const cssW = gameW, cssH = gameH, left = 0, top = 0;
     const nextDPR = mobile ? 1 : Math.min(window.devicePixelRatio || 1, 2);
     if (gameW === W && gameH === H && nextDPR === DPR && cvs.width === Math.round(gameW * nextDPR)) {
       placeLayer(cvs, cssW, cssH, left, top);
@@ -110,7 +97,8 @@
 
   function bgLayout(bg) {
     if (!bg || !bg.width) return null;
-    const scale = Math.max(W / bg.width, H / bg.height) * 1.04;
+    const zoom = isLoFi() ? 1 : 1.04;
+    const scale = Math.max(W / bg.width, H / bg.height) * zoom;
     const dw = bg.width * scale, dh = bg.height * scale;
     return { scale, dw, dh, dx: (W - dw) * 0.5, dy: (H - dh) * 0.5 };
   }
@@ -1291,13 +1279,19 @@
     setTimeout(finish, (delay || 0) + 750);
   }
 
+  function draftCardWidth() {
+    const vw = innerWidth, vh = innerHeight;
+    return Math.max(92, Math.min(200, Math.floor((vw - 32) / 3.45), Math.floor(vh * 0.34)));
+  }
+
   function makeDraftCard(id, extraClass) {
     const law = lawById(id);
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.dataset.id = id;
-    btn.className = 'draft-card relative w-[200px] origin-center border-0 bg-transparent p-0 text-center '
+    btn.className = 'draft-card relative origin-center border-0 bg-transparent p-0 text-center '
       + (extraClass || '');
+    btn.style.width = draftCardWidth() + 'px';
     btn.innerHTML = '<span class="card-slot relative block w-full">'
       + '<img class="card-face block w-full rounded-[8px] shadow-[5px_8px_0_rgba(20,10,6,0.45)]" src="'
       + lawArt(id) + '" alt="">'
@@ -1312,10 +1306,11 @@
     setLaws(ids);
     if (draftHintEl) draftHintEl.textContent = '';
     if (draftCardsEl) draftCardsEl.innerHTML = '';
-    const w = 200, gap = 28;
+    const w = draftCardWidth();
+    const gap = Math.max(12, Math.round(w * 0.14));
     const total = w * 2 + gap;
     const left0 = window.innerWidth / 2 - total / 2;
-    const top = window.innerHeight / 2 - 160;
+    const top = window.innerHeight / 2 - Math.round(w * 0.8);
     const btns = ids.map((id, i) => {
       const btn = makeDraftCard(id, 'is-fate');
       btn.style.position = 'fixed';
@@ -3701,11 +3696,8 @@
   function drawSky(gy) {
     const bg = playBg();
     if (bg && bg.width) {
-      const scale = Math.max(W / bg.width, H / bg.height) * 1.04;
-      const dw = bg.width * scale, dh = bg.height * scale;
-      const dx = (W - dw) * 0.5;
-      const dy = (H - dh) * 0.5;
-      ctx.drawImage(bg, dx, dy, dw, dh);
+      const lay = bgLayout(bg);
+      ctx.drawImage(bg, lay.dx, lay.dy, lay.dw, lay.dh);
       return;
     }
 

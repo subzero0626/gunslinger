@@ -376,6 +376,33 @@
     transform: translate(-50%, -50%) scale(1);
   }
 
+  @media (hover: none) and (pointer: coarse) {
+    #draftCards { gap: 6px; }
+    #draftHint { margin-bottom: 0.7rem; font-size: 13px; }
+    .card-text { font-size: 9px; line-height: 1.35; }
+    #lawCard { width: min(168px, 38vw) !important; }
+    .draft-card.tilt-l { transform: rotate(-8deg) translateY(1rem); }
+    .draft-card.tilt-c { transform: none; }
+    .draft-card.tilt-r { transform: rotate(8deg) translateY(1rem); }
+    .draft-card.tilt-l.is-hover:not(.is-burnt):not(.is-enter) {
+      transform: rotate(-8deg) translateY(calc(1rem - 10px)) scale(1.05);
+    }
+    .draft-card.tilt-c.is-hover:not(.is-burnt):not(.is-enter) {
+      transform: translateY(-10px) scale(1.05);
+    }
+    .draft-card.tilt-r.is-hover:not(.is-burnt):not(.is-enter) {
+      transform: rotate(8deg) translateY(calc(1rem - 10px)) scale(1.05);
+    }
+    @keyframes cardRiseL {
+      from { opacity: 0; transform: rotate(-8deg) translateY(calc(1rem + 48vh)); }
+      to { opacity: 1; transform: rotate(-8deg) translateY(1rem); }
+    }
+    @keyframes cardRiseR {
+      from { opacity: 0; transform: rotate(8deg) translateY(calc(1rem + 48vh)); }
+      to { opacity: 1; transform: rotate(8deg) translateY(1rem); }
+    }
+  }
+
   #wantedStatus {
     position: fixed; top: 14px; left: 50%;
     z-index: 20;
