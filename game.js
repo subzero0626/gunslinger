@@ -24,10 +24,22 @@
     el.style.margin = '0';
   }
 
+  function viewBox() {
+    const vv = window.visualViewport;
+    if (vv && vv.width > 0 && vv.height > 0) {
+      return { w: Math.max(1, Math.round(vv.width)), h: Math.max(1, Math.round(vv.height)) };
+    }
+    return {
+      w: Math.max(1, Math.round(document.documentElement.clientWidth || innerWidth)),
+      h: Math.max(1, Math.round(document.documentElement.clientHeight || innerHeight)),
+    };
+  }
+
   function resize() {
     const mobile = isLoFi();
-    const gameW = innerWidth;
-    const gameH = innerHeight;
+    const box = viewBox();
+    const gameW = box.w;
+    const gameH = box.h;
     const cssW = gameW, cssH = gameH, left = 0, top = 0;
     const nextDPR = mobile ? 1 : Math.min(window.devicePixelRatio || 1, 2);
     if (gameW === W && gameH === H && nextDPR === DPR && cvs.width === Math.round(gameW * nextDPR)) {
@@ -49,6 +61,7 @@
     }
   }
   addEventListener('resize', resize);
+  if (window.visualViewport) visualViewport.addEventListener('resize', resize);
   resize();
 
   const QUERY = new URLSearchParams(location.search);
@@ -97,8 +110,7 @@
 
   function bgLayout(bg) {
     if (!bg || !bg.width) return null;
-    const zoom = isLoFi() ? 1 : 1.04;
-    const scale = Math.max(W / bg.width, H / bg.height) * zoom;
+    const scale = Math.max(W / bg.width, H / bg.height) * 1.04;
     const dw = bg.width * scale, dh = bg.height * scale;
     return { scale, dw, dh, dx: (W - dw) * 0.5, dy: (H - dh) * 0.5 };
   }
@@ -1281,7 +1293,7 @@
 
   function draftCardWidth() {
     const vw = innerWidth, vh = innerHeight;
-    return Math.max(92, Math.min(200, Math.floor((vw - 32) / 3.45), Math.floor(vh * 0.34)));
+    return Math.max(68, Math.min(140, Math.floor((vw - 20) / 4.6), Math.floor(vh * 0.24)));
   }
 
   function makeDraftCard(id, extraClass) {
