@@ -12,6 +12,8 @@
     return false;
   }
 
+  const DESIGN_W = 1600, DESIGN_H = 900;
+
   function placeLayer(el, cssW, cssH, left, top) {
     if (!el) return;
     el.style.position = 'fixed';
@@ -38,9 +40,20 @@
   function resize() {
     const mobile = isLoFi();
     const box = viewBox();
-    const gameW = box.w;
-    const gameH = box.h;
-    const cssW = gameW, cssH = gameH, left = 0, top = 0;
+    let cssW, cssH, left, top, gameW, gameH;
+    if (mobile) {
+      gameW = DESIGN_W;
+      gameH = DESIGN_H;
+      const fit = Math.min(box.w / gameW, box.h / gameH);
+      cssW = gameW * fit;
+      cssH = gameH * fit;
+      left = (box.w - cssW) * 0.5;
+      top = (box.h - cssH) * 0.5;
+    } else {
+      gameW = box.w;
+      gameH = box.h;
+      cssW = gameW; cssH = gameH; left = 0; top = 0;
+    }
     const nextDPR = mobile ? 1 : Math.min(window.devicePixelRatio || 1, 2);
     if (gameW === W && gameH === H && nextDPR === DPR && cvs.width === Math.round(gameW * nextDPR)) {
       placeLayer(cvs, cssW, cssH, left, top);
@@ -1292,8 +1305,9 @@
   }
 
   function draftCardWidth() {
+    if (!isLoFi()) return 200;
     const vw = innerWidth, vh = innerHeight;
-    return Math.max(68, Math.min(140, Math.floor((vw - 20) / 4.6), Math.floor(vh * 0.24)));
+    return Math.max(110, Math.min(180, Math.floor((vw - 28) / 3.55), Math.floor(vh * 0.32)));
   }
 
   function makeDraftCard(id, extraClass) {
