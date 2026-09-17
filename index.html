@@ -6,6 +6,13 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <title>Gunslinger</title>
+<link rel="icon" type="image/png" sizes="32x32" href="assets/ui/favicon-32.png">
+<link rel="icon" type="image/png" sizes="192x192" href="assets/ui/favicon.png">
+<link rel="apple-touch-icon" href="assets/ui/apple-touch-icon.png">
+<meta name="theme-color" content="#1c1618">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@500;700&display=swap" rel="stylesheet">
 <script src="https://cdn.tailwindcss.com"></script>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/sweetalert2@11/dist/sweetalert2.min.css">
 <style>
@@ -486,16 +493,13 @@
     object-fit: fill;
     transition: opacity 0.18s ease;
   }
-  #wantedBoard.is-ready .wanted-blank[data-blank="multi"],
   #wantedBoard.is-ready:has(.wanted-sheet[data-sheet="multi"]:hover) .wanted-blank[data-blank="multi"],
   #wantedBoard.is-ready:has(.wanted-sheet[data-sheet="multi"].is-open) .wanted-blank[data-blank="multi"],
   #wantedBoard.is-ready.is-hosting .wanted-blank[data-blank="multi"],
   #wantedBoard.is-ready.is-joining .wanted-blank[data-blank="multi"],
   #wantedBoard.is-ready.is-seeking .wanted-blank[data-blank="multi"],
   #wantedBoard.is-ready:has(.wanted-sheet[data-sheet="ai"]:hover) .wanted-blank[data-blank="ai"],
-  #wantedBoard.is-ready:has(.wanted-sheet[data-sheet="ai"].is-open) .wanted-blank[data-blank="ai"],
-  #wantedBoard.is-ready:has(.wanted-sheet[data-sheet="train"]:hover) .wanted-blank[data-blank="train"],
-  #wantedBoard.is-ready:has(.wanted-sheet[data-sheet="train"].is-open) .wanted-blank[data-blank="train"] {
+  #wantedBoard.is-ready:has(.wanted-sheet[data-sheet="ai"].is-open) .wanted-blank[data-blank="ai"] {
     opacity: 1;
   }
   #wantedBoard .wanted-acts,
@@ -509,14 +513,11 @@
     transform: translateY(8px);
     transition: opacity 0.2s ease, transform 0.2s ease;
   }
-  #wantedBoard .wanted-notice,
-  #wantedBoard .wanted-hint {
+  #wantedBoard .wanted-notice {
     opacity: 0;
     pointer-events: none;
     transition: opacity 0.22s ease;
   }
-  #wantedBoard.is-ready .wanted-sheet.is-multi .wanted-acts,
-  #wantedBoard.is-ready .wanted-sheet.is-multi .wanted-mode,
   #wantedBoard.is-ready .wanted-sheet:hover .wanted-acts,
   #wantedBoard.is-ready .wanted-sheet.is-open .wanted-acts,
   #wantedBoard.is-ready .wanted-sheet:hover .wanted-wait,
@@ -529,11 +530,9 @@
     transform: none;
   }
   #wantedBoard.is-ready .wanted-sheet:hover .wanted-notice.is-on,
-  #wantedBoard.is-ready .wanted-sheet.is-open .wanted-notice.is-on,
-  #wantedBoard.is-ready .wanted-hint {
+  #wantedBoard.is-ready .wanted-sheet.is-open .wanted-notice.is-on {
     opacity: 1;
   }
-  #wantedBoard.is-ready .wanted-hint { pointer-events: none; }
   #wantedBoard.is-hosting .wanted-acts,
   #wantedBoard.is-joining .wanted-acts,
   #wantedBoard.is-seeking .wanted-acts { display: none; }
@@ -556,7 +555,7 @@
     top: 13%;
     left: 11%;
     margin: 0;
-    padding: 0 0 4px;
+    padding: 0;
     opacity: 0;
     pointer-events: none;
     white-space: nowrap;
@@ -564,10 +563,8 @@
     letter-spacing: 0.22em;
     color: #7a3324;
     text-shadow: 0 1px 0 rgba(255,244,220,0.55);
-    border-bottom: 1px solid rgba(110, 40, 28, 0.35);
     transition: opacity 0.18s ease;
   }
-  #wantedBoard.is-ready .wanted-sheet.is-multi .wanted-mode,
   #wantedBoard.is-ready .wanted-sheet:hover .wanted-mode,
   #wantedBoard.is-ready .wanted-sheet.is-open .wanted-mode,
   #wantedBoard.is-ready.is-hosting .wanted-sheet.is-multi .wanted-mode,
@@ -622,8 +619,8 @@
     z-index: 2;
     width: auto;
     flex: none;
-    justify-content: space-between;
-    gap: 18px;
+    justify-content: center;
+    gap: 10px;
     padding: 0;
     transform: none;
   }
@@ -631,7 +628,7 @@
     flex: none;
     width: 100%;
     min-height: 0;
-    padding: 10px 8px 11px;
+    padding: 12.5px 8px 13.75px;
     font-size: 16px;
     font-weight: 800;
     letter-spacing: 0.14em;
@@ -654,6 +651,64 @@
     clip-path: polygon(0 10%, 8% 0, 100% 4%, 98% 88%, 90% 100%, 2% 96%, 1% 18%);
   }
   #wantedBoard .wanted-sheet.is-multi .wanted-acts button:hover {
+    filter: brightness(1.12);
+  }
+  #wantedBoard .wanted-sheet.is-ai {
+    justify-content: stretch;
+    align-items: stretch;
+    padding: 0;
+    overflow: visible;
+  }
+  #wantedBoard .wanted-sheet.is-ai .wanted-acts {
+    position: absolute;
+    left: auto;
+    right: -3%;
+    width: 90%;
+    top: 28%;
+    bottom: 14%;
+    z-index: 2;
+    flex: none;
+    justify-content: center;
+    align-items: stretch;
+    gap: 10px;
+    padding: 0;
+    transform: none;
+  }
+  #wantedBoard .wanted-sheet.is-ai .wanted-acts button {
+    flex: none;
+    width: 100%;
+    min-height: 0;
+    padding: 12.5px 8px 13.75px;
+    font-size: 16px;
+    font-weight: 800;
+    letter-spacing: 0.14em;
+    white-space: nowrap;
+    color: #f3e2c4;
+    text-shadow: 0 1px 0 rgba(20, 8, 4, 0.45);
+    background:
+      radial-gradient(ellipse at 18% 8%, rgba(255, 214, 170, 0.22), transparent 52%),
+      linear-gradient(175deg, #9a3a28 0%, #6e2218 48%, #4e1610 100%);
+    box-shadow:
+      3px 4px 0 rgba(28, 10, 6, 0.5),
+      inset 0 1px 0 rgba(255, 226, 190, 0.22),
+      inset 0 -2px 0 rgba(20, 6, 4, 0.25);
+    clip-path: polygon(2% 6%, 6% 0, 97% 3%, 100% 16%, 98% 94%, 92% 100%, 3% 97%, 0 82%);
+  }
+  #wantedBoard .wanted-sheet.is-ai .wanted-acts button.mid {
+    color: #f0e6d2;
+    background:
+      radial-gradient(ellipse at 50% 10%, rgba(255, 220, 180, 0.18), transparent 48%),
+      linear-gradient(175deg, #7a3a24 0%, #5a2818 52%, #3e1810 100%);
+    clip-path: polygon(0 8%, 8% 0, 100% 4%, 97% 90%, 90% 100%, 2% 96%, 1% 16%);
+  }
+  #wantedBoard .wanted-sheet.is-ai .wanted-acts button.join {
+    color: #f0e6d2;
+    background:
+      radial-gradient(ellipse at 80% 12%, rgba(255, 220, 180, 0.18), transparent 48%),
+      linear-gradient(175deg, #6a4a32 0%, #4a3224 52%, #352218 100%);
+    clip-path: polygon(0 10%, 8% 0, 100% 4%, 98% 88%, 90% 100%, 2% 96%, 1% 18%);
+  }
+  #wantedBoard .wanted-sheet.is-ai .wanted-acts button:hover {
     filter: brightness(1.12);
   }
   #wantedBoard .wanted-sheet.is-multi .wanted-wait,
@@ -756,18 +811,36 @@
     box-shadow: 2px 3px 0 rgba(20,10,6,0.32);
     clip-path: polygon(2% 0, 98% 3%, 100% 90%, 95% 100%, 3% 97%, 0 12%);
   }
-  #wantedBoard .wanted-hint {
-    position: absolute;
-    margin: 0;
-    font: 11px/1.3 "Palatino Linotype", "Book Antiqua", "Malgun Gothic", serif;
-    letter-spacing: 0.12em;
-    color: rgba(244, 230, 208, 0.82);
-    text-shadow: 0 1px 2px rgba(0,0,0,0.55);
-    white-space: nowrap;
-    transform: translate(-50%, -50%);
-  }
   #wantedBoard .wanted-dim { pointer-events: none; }
   #wantedBoard.is-ready .wanted-dim { pointer-events: auto; }
+  #wantedBoard .wanted-sheet.is-locked {
+    cursor: default;
+  }
+
+  @media (hover: none) and (pointer: coarse) {
+    #wantedBoard.is-ready .wanted-blank[data-blank="multi"],
+    #wantedBoard.is-ready .wanted-blank[data-blank="ai"] {
+      opacity: 1;
+    }
+    #wantedBoard.is-ready .wanted-sheet:not(.is-locked) .wanted-acts,
+    #wantedBoard.is-ready .wanted-sheet:not(.is-locked) .wanted-mode {
+      opacity: 1;
+      pointer-events: auto;
+      transform: none;
+    }
+    #wantedBoard.is-ready .wanted-sheet:not(.is-locked) .wanted-mode { opacity: 0.92; }
+  }
+  #wantedBoard.is-touch.is-ready .wanted-blank[data-blank="multi"],
+  #wantedBoard.is-touch.is-ready .wanted-blank[data-blank="ai"] {
+    opacity: 1;
+  }
+  #wantedBoard.is-touch.is-ready .wanted-sheet:not(.is-locked) .wanted-acts,
+  #wantedBoard.is-touch.is-ready .wanted-sheet:not(.is-locked) .wanted-mode {
+    opacity: 1;
+    pointer-events: auto;
+    transform: none;
+  }
+  #wantedBoard.is-touch.is-ready .wanted-sheet:not(.is-locked) .wanted-mode { opacity: 0.92; }
 
 
 </style>
@@ -805,18 +878,16 @@
         <button type="button" data-act="join-cancel">그만두기</button>
       </div>
     </div>
-    <div class="wanted-sheet" data-sheet="ai">
+    <div class="wanted-sheet is-ai" data-sheet="ai">
+      <p class="wanted-mode">AI대전</p>
       <div class="wanted-acts">
-        <button type="button" data-act="ai">현상금</button>
+        <button type="button" data-act="ai" data-ai="0">풋내기</button>
+        <button type="button" class="mid" data-act="ai" data-ai="1">현상금 사냥꾼</button>
+        <button type="button" class="join" data-act="ai" data-ai="2">전설</button>
       </div>
       <p id="wantedNotice" class="wanted-notice"></p>
     </div>
-    <div class="wanted-sheet" data-sheet="train">
-      <div class="wanted-acts">
-        <button type="button" data-act="train">연습</button>
-      </div>
-    </div>
-    <p class="wanted-hint">Esc / 바깥 터치로 닫기</p>
+    <div class="wanted-sheet is-locked" data-sheet="train"></div>
   </div>
 </div>
 <div id="titleCard" class="pointer-events-none hidden"></div>

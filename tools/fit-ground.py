@@ -144,7 +144,7 @@ def two_level_keys(ys, h):
     pad = max(8, int(n * 0.05))
     interior = ys[pad:-pad]
     y_hi, y_lo = kmeans2(interior)
-    y_hi += 7
+    y_hi += 1
     y_lo += 1
     if y_lo - y_hi < h * 0.04:
         med = sorted(interior)[len(interior) // 2]

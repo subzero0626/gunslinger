@@ -82,7 +82,17 @@
   let pendingSeed = null;
   let obstacleSeed = 7;
   let netReady = false;
-  const BG_GROUND = 0.777;
+  let vsAi = false;
+  let aiLevel = 1;
+  const AI_THINK = 0.22;
+  const AI_FIRE = 0.62;
+  const AI_LEVELS = [
+    { name: '풋내기', acc: 0.56, dodge: 0.03, jump: 0.01, law: 0.03, terrain: 0.02 },
+    { name: '현상금 사냥꾼', acc: 0.32, dodge: 0.2, jump: 0.09, law: 0.24, terrain: 0.2 },
+    { name: '전설', acc: 0.26, dodge: 0.32, jump: 0.16, law: 0.36, terrain: 0.3 },
+  ];
+  const aiBot = { t: 0, dir: 0, fireCd: 0.45, dodgeCd: 0, jumpCd: 0, aimX: 0, aimY: 0, draftWait: 0, head: false, campX: null, campT: 0, push: false, hideT: 0 };
+  const BG_GROUND = 0.7717;
 
   function inMatch() {
     return !!netReady;
@@ -134,6 +144,11 @@
     return Math.round(lay.dy + heightRatio(u) * lay.dh);
   }
 
+  const FOOT_SINK = 10;
+  function standAt(x) {
+    return groundAt(x) + FOOT_SINK - (activeMapId() === 'flat' ? 6 : 0);
+  }
+
   function groundSlope(x) {
     const d = 12;
     return Math.atan2(groundAt(x + d) - groundAt(x - d), d * 2);
@@ -175,11 +190,12 @@
   function snapToGround() {
     for (const pl of players) {
       if (!pl || !pl.onGround) continue;
-      pl.y = groundAt(pl.x);
+      pl.y = standAt(pl.x);
       pl.vy = 0;
     }
     if (board && board.x) board.y = groundAt(board.x);
     layoutObstacles();
+    placeInstructor();
   }
 
   function broadcastMap() {
@@ -210,7 +226,7 @@
   const ARM_K = BODY_K * 0.62 * 0.84;
   const GUN_K = BODY_K * 0.55 * 0.84;
   const ARM_FRAME = 2;                      // 팔을 앞으로 뻗은 프레임
-  const AMMO = 6, RELOAD_TIME = 1.5, DODGE_TIME = 0.5, TWIN_GAP = 0.16, INVULN_TIME = 0.95;
+  const AMMO = 6, RELOAD_TIME = 1.5, DODGE_TIME = 0.5, DODGE_COOLDOWN = 1.5, TWIN_GAP = 0.16, INVULN_TIME = 0.95;
   const RUN_SPEED = 375, BACK_SPEED = RUN_SPEED * 0.65, DODGE_SPEED = 720, JUMP_V = 880;
   const BULLET_SPEED = 3200;
   const RUN_STRIDE = 26;                    // 프레임 1장당 이동 거리(px) → 발 미끄러짐 방지
@@ -247,17 +263,28 @@
   const BENCH_TOP = 0.86;  // 벤치 윗면 높이 (아래에서부터 비율)
 
   const OBJ_IDS = [
-    'spire', 'boulders', 'logs', 'hay', 'cactus', 'fence',
-    'windmill', 'gallows', 'crates', 'rail', 'shade', 'snag',
+    'boulders', 'logs', 'hay', 'fence',
+    'windmill', 'gallows', 'crates', 'rail', 'snag',
     'tank', 'tank_rust', 'lookout', 'deadtree', 'oak',
   ];
   const OBJ_TALL = { windmill: 1, tank: 1, tank_rust: 1, lookout: 1, gallows: 1 };
-  const OBJ_H = {
-    spire: 120, boulders: 86, logs: 72, hay: 68, cactus: 110, fence: 72,
-    crates: 90, rail: 70, shade: 96, snag: 124, deadtree: 148, oak: 168,
+  const OBJ_TREE = { oak: 1, deadtree: 1, snag: 1 };
+  const OBJ_TREE_LEAF = { oak: 1 };
+  // 아래쪽 나무 받침(다리)은 걸어가고 총알도 통과. 값은 오브젝트 높이 비율
+  const OBJ_OPEN_BASE = {
+    windmill: 0.52, tank: 0.40, tank_rust: 0.40, lookout: 0.46, gallows: 0.58,
+    oak: 0.38,
   };
-  const OBJ_SCALE = 1.2;
-  const OBJ_PLANT = 3; // 발끝을 진한 흙 표면에 맞춤
+  const OBJ_CLIMB = {
+    lookout: { u0: 0.72, u1: 1.04, deck: 0.50, deckL: 0.16, deckR: 0.90 },
+    gallows: { u0: 0.70, u1: 1.04, deck: 0.62, deckL: 0.10, deckR: 0.92 },
+  };
+  const OBJ_H = {
+    boulders: 86, logs: 72, hay: 68, fence: 72,
+    crates: 90, rail: 70, snag: 118, deadtree: 132, oak: 148,
+  };
+  const OBJ_PLANT = 1; // 나무 발
+  const OBJ_DIRT = 8; // 연한 갈색 중간 → 진한 갈색 지면
   const OBJ_MASKS = {};
   const obstacles = [];
   const MASK_A = 40;
@@ -267,10 +294,9 @@
   }
 
   function objDrawH(id) {
-    if (OBJ_TALL[id]) return BODY_H * 3 * OBJ_SCALE;
-    if (id === 'shade') return BODY_H * 2 * OBJ_SCALE;
-    const tree = id === 'oak' || id === 'deadtree' || id === 'snag' ? 1.5 : 1;
-    return (OBJ_H[id] || 90) * OBJ_SCALE * tree;
+    if (OBJ_TALL[id]) return BODY_H * 3 * 1.2;
+    if (OBJ_TREE[id]) return (OBJ_H[id] || 130) * 1.75;
+    return (OBJ_H[id] || 72) * 1.2;
   }
 
   function inflateMask(raw) {
@@ -361,13 +387,14 @@
   function layoutObstacles() {
     obstacles.length = 0;
     if (!W || !H) return;
+    if (!inMatch()) return;
     const rng = seeded(obstacleSeed || 7);
     const pool = OBJ_IDS.filter(id => objImg(id) && OBJ_MASKS[id]);
     for (let i = pool.length - 1; i > 0; i--) {
       const j = (rng() * (i + 1)) | 0;
       const t = pool[i]; pool[i] = pool[j]; pool[j] = t;
     }
-    const want = netReady ? 4 + (rng() < 0.55 ? 1 : 0) + (rng() < 0.35 ? 1 : 0) : 5;
+    const want = 4 + (rng() < 0.55 ? 1 : 0) + (rng() < 0.35 ? 1 : 0);
     const bands = plateauBands();
     const placed = [];
     for (let p = 0; p < pool.length && obstacles.length < want; p++) {
@@ -392,42 +419,86 @@
         const x = W * u;
         const gy = groundAt(x);
         const padB = Math.max(0, (mask.h - 1 - (mask.foot == null ? mask.h - 1 : mask.foot)) / mask.h);
+        const plant = OBJ_TREE[id]
+          ? OBJ_PLANT + Math.min(18, h * 0.08)
+          : (activeMapId() === 'flat' ? OBJ_DIRT + 2 : 3 + 15);
         obstacles.push({
           id, img, mask, x,
           gy,
-          y: gy + OBJ_PLANT + h * padB,
+          y: gy + plant + h * padB,
           w: dw,
           h,
           tall: !!OBJ_TALL[id],
+          tree: !!OBJ_TREE[id],
+          leaf: !!OBJ_TREE_LEAF[id],
         });
         put = true;
       }
     }
   }
 
-  function obstacleSolid(wx, wy, walk) {
+  function obstacleAt(wx, wy) {
     for (let i = 0; i < obstacles.length; i++) {
       const b = obstacles[i];
       const left = b.x - b.w * 0.5;
       if (wx < left || wx > left + b.w || wy < b.y - b.h || wy > b.y + 2) continue;
-      if (walk && b.tall && wy > b.gy - BODY_H * 1.22) continue;
+      if ((b.tall || b.leaf) && wy > b.gy - b.h * (OBJ_OPEN_BASE[b.id] || 0.4)) continue;
       const lx = ((wx - left) / b.w) * b.mask.w;
       const ly = ((wy - (b.y - b.h)) / b.h) * b.mask.h;
-      if (maskSolid(b.mask, lx, ly)) return true;
+      if (maskSolid(b.mask, lx, ly)) return b;
     }
-    return false;
+    return null;
   }
 
-  function obstacleRayHit(x0, y0, x1, y1) {
+  function obstacleSolid(wx, wy, walk) {
+    return !!obstacleAt(wx, wy);
+  }
+
+  function obstacleRayHit(x0, y0, x1, y1, shot) {
     const dx = x1 - x0, dy = y1 - y0;
     const dist = Math.hypot(dx, dy);
     const n = Math.max(1, Math.ceil(dist));
     for (let i = 1; i <= n; i++) {
       const t = i / n;
       const x = x0 + dx * t, y = y0 + dy * t;
-      if (obstacleSolid(x, y, false)) return { x, y };
+      const hit = obstacleAt(x, y);
+      if (!hit) continue;
+      if (shot && hit.tree && !hit.leaf && shot.treePass) continue;
+      return { x, y };
     }
     return null;
+  }
+
+  function climbInfo(x, y) {
+    for (let i = 0; i < obstacles.length; i++) {
+      const b = obstacles[i];
+      const c = OBJ_CLIMB[b.id];
+      if (!c) continue;
+      const left = b.x - b.w * 0.5;
+      const u = (x - left) / b.w;
+      if (u < c.u0 || u > c.u1) continue;
+      const deckY = b.gy - b.h * c.deck;
+      if (y < deckY - 24 || y > b.gy + 12) continue;
+      return { b, deckY, gy: b.gy };
+    }
+    return null;
+  }
+
+  function floorAt(x, y, drop) {
+    let gy = standAt(x);
+    if (drop) return gy;
+    for (let i = 0; i < obstacles.length; i++) {
+      const b = obstacles[i];
+      const c = OBJ_CLIMB[b.id];
+      if (!c) continue;
+      const left = b.x - b.w * 0.5;
+      const u = (x - left) / b.w;
+      if (u < c.deckL || u > c.deckR) continue;
+      const py = b.gy - b.h * c.deck;
+      if (py >= gy - 2) continue;
+      if (y <= py + 18) gy = py;
+    }
+    return gy;
   }
 
   function playerHitsObstacle(pl) {
@@ -486,6 +557,7 @@
     hudBullet3: 'assets/ui/bullet3.png',
     hudBullet4: 'assets/ui/bullet4.png',
     reload0: 'assets/ui/reload0.png',
+    instructor: 'assets/npc/instructor.png',
     obj_spire: 'assets/obj/spire.png',
     obj_boulders: 'assets/obj/boulders.png',
     obj_logs: 'assets/obj/logs.png',
@@ -588,6 +660,7 @@
     try { buildObjMasks(); } catch (e) { console.warn('obj masks', e); }
     layoutTargets();
     useTownMap();
+    placeInstructor();
     snapViewRest();
     prefetchArenaMaps();
     last = performance.now();
@@ -839,10 +912,11 @@
   }
 
   function autoBanDraft() {
-    if (!draft || draft.burning || draft.revealing || draft.turn !== myRole) return;
+    if (!draft || draft.burning || draft.revealing) return;
+    if (draft.turn !== myRole && !vsAi) return;
     const left = draft.ids.filter(id => !draft.banned.includes(id));
     if (!left.length) return;
-    banDraftCard(left[Math.floor(Math.random() * left.length)], true);
+    banDraftCard(left[Math.floor(Math.random() * left.length)], draft.turn === myRole);
   }
   const series = { host: 0, guest: 0 };
   const SERIES_WINS = 3;
@@ -857,7 +931,7 @@
     { id: 'hat', title: '날아간 모자', text: '구르거나 점프한 직후 조준이 크게 흔들린다' },
     { id: 'sniper', title: '저격수', text: '머리를 맞출 때만 피해가 들어간다' },
     { id: 'lastshot', title: '마지막 한 발', text: '모든 탄환이 적을 크게 밀친다' },
-    { id: 'chalice', title: '성배', text: '장전을 마치면 체력을 3 회복한다' },
+    { id: 'chalice', title: '성배', text: '탄환을 모두 써 자동 장전되면 체력을 2 회복한다' },
     { id: 'twin', title: '쌍권총', text: '두 발을 연달아 쏜다' },
     { id: 'hasty', title: '성급한 손', text: '연사가 빨라진다' },
     { id: 'shackle', title: '긴 구르기', text: '구르기가 더 멀리 나간다' },
@@ -1393,6 +1467,7 @@
       myRole = null;
       other = null;
       netReady = false;
+      vsAi = false;
       matchOver = false;
       overOpen = false;
       myRematch = false;
@@ -1410,7 +1485,7 @@
         useTownMap();
         resetMatchSpawn();
         me.x = W * 0.28;
-        me.y = groundAt(me.x);
+        me.y = standAt(me.x);
         me.facing = 1;
       }
     };
@@ -1440,6 +1515,339 @@
   function placePortal() {
     board.x = W * 0.62;
     board.y = groundAt(board.x);
+  }
+
+  const instructor = { x: 0, y: 0 };
+  const TUTOR_FONT = '700 14px "Noto Sans KR", sans-serif';
+  const tutor = {
+    lesson: 0,
+    phase: 'idle',
+    near: false,
+    moveT: 0,
+    jumps: 0,
+    dodges: 0,
+    shots: 0,
+    reloaded: false,
+    say: '',
+    shown: 0,
+    quest: '',
+    hold: 0,
+    pop: 0,
+    taught: false,
+  };
+
+  function tutorTouch() {
+    return usingTouch || isLoFi();
+  }
+
+  function tutorLessons() {
+    const touch = tutorTouch();
+    return [
+      {
+        talk: '총잡이가 되고 싶은 겐가.\n먼저 발을 놀릴 줄 알아야지.',
+        quest: touch ? '화면을 끌어 돌아다녀 보게.' : 'A / D 키로 돌아다녀 보게.',
+        clear: '그래, 다리가 붙었군.',
+      },
+      {
+        talk: '땅만 밟고 있을 순 없지.\n높이 뜨는 법도 익혀두게.',
+        quest: touch ? '위로 쓸어 점프하기' : 'Space / W 로 점프하기',
+        need: 3,
+        stat: 'jumps',
+        clear: '그래, 몸이 가벼워졌군.',
+      },
+      {
+        talk: '총알은 몸으로 받지 말게.\n구르면 총알을 피할 수 있지.',
+        quest: touch ? '옆으로 쓸어 구르기' : 'Shift 키로 구르기',
+        need: 3,
+        stat: 'dodges',
+        clear: '빠르군. 탄이 날아오면 그렇게 피하게.',
+      },
+      {
+        talk: '총은 조준한 곳으로 나가지.\n탄이 비면 다시 채워 넣게.',
+        quest: touch ? '짧게 눌러 두어 발 쏘게.' : '클릭으로 쏘고, R 로 재장전해 보게.',
+        clear: '이 정도면 됐네.\n오른쪽 게시판을 보게.',
+      },
+    ];
+  }
+
+  function placeInstructor() {
+    instructor.x = Math.round(W * 0.12);
+    instructor.y = groundAt(instructor.x);
+  }
+
+  function tutorOn() {
+    return !netReady && !PREVIEW;
+  }
+
+  function tutorSay(s) {
+    if (s == null || s === tutor.say) return;
+    tutor.say = s;
+    tutor.shown = 0;
+  }
+
+  function questLabel(pack) {
+    if (!pack) return '';
+    if (!pack.need) return pack.quest;
+    const n = Math.min(tutor[pack.stat] || 0, pack.need);
+    return pack.quest + '  ' + n + '/' + pack.need;
+  }
+
+  function refreshTutorQuest() {
+    const pack = tutorLessons()[tutor.lesson];
+    if (!pack || tutor.phase !== 'quest') return;
+    const q = questLabel(pack);
+    tutor.quest = q;
+    tutor.say = pack.talk + '\n\n' + q;
+    tutor.shown = tutor.say.length;
+    tutor.pop = 1;
+  }
+
+  function startTutorLesson(i) {
+    const pack = tutorLessons()[i];
+    if (!pack) return;
+    tutor.lesson = i;
+    tutor.phase = 'talk';
+    tutor.moveT = 0;
+    tutor.jumps = 0;
+    tutor.dodges = 0;
+    tutor.shots = 0;
+    tutor.reloaded = false;
+    tutor.hold = 0.4;
+    tutor.pop = 0;
+    tutor.quest = questLabel(pack);
+    tutorSay(pack.talk);
+    if (i === 3 && me) {
+      me.ammo = lawAmmo();
+      me.reloadT = 0;
+      me.autoReload = 0;
+    }
+  }
+
+  function showTutorQuest() {
+    const pack = tutorLessons()[tutor.lesson];
+    if (!pack) return;
+    tutor.phase = 'quest';
+    tutor.moveT = 0;
+    const q = questLabel(pack);
+    tutor.say = pack.talk + '\n\n' + q;
+    tutor.shown = pack.talk.length;
+    tutor.quest = q;
+  }
+
+  function tryTalkInstructor() {
+    if (!tutorOn() || !tutor.near || board.open) return false;
+    if (tutor.phase === 'talk') {
+      if (tutor.shown < tutor.say.length) tutor.shown = tutor.say.length;
+      else showTutorQuest();
+      return true;
+    }
+    if (tutor.phase === 'quest' || tutor.phase === 'clear') {
+      if (tutor.shown < tutor.say.length) tutor.shown = tutor.say.length;
+      return true;
+    }
+    if (tutor.phase === 'chat') {
+      if (tutor.shown < tutor.say.length) tutor.shown = tutor.say.length;
+      return true;
+    }
+    if (tutor.phase === 'done') {
+      tutorSay('오른쪽 게시판을 보게.');
+      return true;
+    }
+    if (tutor.taught) {
+      tutor.phase = 'chat';
+      tutorSay('더 가르칠 게 없네.');
+      return true;
+    }
+    startTutorLesson(0);
+    return true;
+  }
+
+  function finishTutorQuest() {
+    const pack = tutorLessons()[tutor.lesson];
+    if (!pack) return;
+    tutor.phase = 'clear';
+    tutor.hold = 1.15;
+    tutorSay(pack.clear);
+  }
+
+  function nextTutorLesson() {
+    tutor.lesson += 1;
+    if (tutor.lesson >= 4) {
+      tutor.phase = 'done';
+      tutor.taught = true;
+      tutor.quest = '';
+      return;
+    }
+    startTutorLesson(tutor.lesson);
+  }
+
+  function updateTutor(dt) {
+    if (!tutorOn()) return;
+    placeInstructor();
+    tutor.near = !!(me && Math.abs(me.x - instructor.x) < 78 && Math.abs(me.y - instructor.y) < 96);
+    if (board.open) return;
+
+    if (tutor.shown < tutor.say.length) {
+      tutor.shown = Math.min(tutor.say.length, tutor.shown + dt * 28);
+    }
+    if (tutor.pop > 0) tutor.pop = Math.max(0, tutor.pop - dt / 0.32);
+
+    if (tutor.phase === 'talk') {
+      if (tutor.shown < tutor.say.length) return;
+      tutor.hold -= dt;
+      if (tutor.hold <= 0) showTutorQuest();
+      return;
+    }
+
+    if (tutor.phase === 'clear') {
+      if (tutor.shown < tutor.say.length) return;
+      tutor.hold -= dt;
+      if (tutor.hold <= 0) nextTutorLesson();
+      return;
+    }
+
+    if (tutor.phase !== 'quest') return;
+    if (tutor.shown < tutor.say.length) return;
+
+    let done = false;
+    if (tutor.lesson === 0) {
+      if (me && !locked() && Math.abs(me.vx || 0) > 40) tutor.moveT += dt;
+      done = tutor.moveT >= 4;
+    } else if (tutor.lesson === 1) {
+      done = tutor.jumps >= 3;
+    } else if (tutor.lesson === 2) {
+      done = tutor.dodges >= 3;
+    } else if (tutor.lesson === 3) {
+      if (tutorTouch() && tutor.shots >= 2 && me && me.ammo < lawAmmo() && me.reloadT <= 0 && me.autoReload <= 0) {
+        startReload(me);
+      }
+      done = tutor.shots >= 1 && tutor.reloaded;
+    }
+    if (done) {
+      tutor.hold -= dt;
+      if (tutor.hold <= 0) finishTutorQuest();
+    } else {
+      tutor.hold = 0.4;
+    }
+  }
+
+  function instructorSize() {
+    const img = IMG.instructor;
+    const h = BODY_H * 1.12;
+    const w = img && img.width ? h * (img.width / img.height) : 72;
+    return { img, w, h };
+  }
+
+  function wrapLines(text, maxW) {
+    const lines = [];
+    const parts = String(text || '').split('\n');
+    for (let p = 0; p < parts.length; p++) {
+      const para = parts[p];
+      let cur = '';
+      for (let i = 0; i < para.length; i++) {
+        const next = cur + para[i];
+        if (cur && ctx.measureText(next).width > maxW) {
+          lines.push(cur);
+          cur = para[i];
+        } else cur = next;
+      }
+      lines.push(cur);
+    }
+    return lines.length ? lines : [''];
+  }
+
+  function strokeFillText(s, x, y) {
+    ctx.strokeText(s, x, y);
+    ctx.fillText(s, x, y);
+  }
+
+  function drawInstructor(t) {
+    if (!tutorOn()) return;
+    const { img, w, h } = instructorSize();
+    const bob = Math.sin((t || 0) * 2.05) * 1.4;
+    const x = instructor.x;
+    const y = instructor.y;
+    ctx.save();
+    ctx.globalAlpha *= 0.22;
+    ctx.fillStyle = '#1a100c';
+    ctx.beginPath();
+    ctx.ellipse(x, y + 1, w * 0.34, 6.5, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+    if (img && img.width) ctx.drawImage(img, x - w * 0.52, y - h + 6 + bob, w, h);
+  }
+
+  function drawTutorSpeech(t) {
+    if (!tutorOn() || board.open || !tutor.say) return;
+    if (tutor.phase === 'idle') return;
+    const n = Math.min(tutor.say.length, Math.floor(tutor.shown + 0.001));
+    const text = tutor.say.slice(0, n);
+    if (!text) return;
+    ctx.font = TUTOR_FONT;
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
+    ctx.lineJoin = 'round';
+    ctx.lineWidth = 3.5;
+    ctx.strokeStyle = 'rgba(16, 9, 6, 0.9)';
+    const maxW = 240;
+    const lines = wrapLines(text, maxW);
+    const lineH = 20;
+    const { w, h } = instructorSize();
+    let bx = instructor.x + w * 0.42;
+    let by = instructor.y - h - 8 - lines.length * lineH;
+    bx = clamp(bx, 12, W - maxW - 12);
+    by = Math.max(10, by);
+    const questAt = tutor.say.indexOf('\n\n');
+    let seen = 0;
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      const isQuest = questAt >= 0 && seen >= questAt && line.length > 0;
+      const y = by + i * lineH;
+      ctx.fillStyle = isQuest ? '#ffe08a' : '#fff6e0';
+      const count = isQuest ? line.match(/^(.*?)(\d+\/\d+)\s*$/) : null;
+      if (count && tutor.pop > 0) {
+        const prefix = count[1];
+        const num = count[2];
+        strokeFillText(prefix, bx, y);
+        const nx = bx + ctx.measureText(prefix).width;
+        const nw = ctx.measureText(num).width;
+        const p = tutor.pop;
+        const k = 1 + 0.38 * p * p;
+        ctx.save();
+        ctx.translate(nx + nw * 0.5, y + 10);
+        ctx.scale(k, k);
+        ctx.fillStyle = p > 0.25 ? '#fff8dc' : '#ffe08a';
+        strokeFillText(num, -nw * 0.5, -10);
+        ctx.restore();
+      } else {
+        strokeFillText(line, bx, y);
+      }
+      seen += line.length + 1;
+    }
+    if (n < tutor.say.length && Math.floor((t || 0) * 6) % 2 === 0) {
+      const last = lines[lines.length - 1] || '';
+      const cx = bx + ctx.measureText(last).width + 3;
+      const cy = by + (lines.length - 1) * lineH;
+      ctx.fillStyle = '#fff6e0';
+      ctx.fillRect(cx, cy + 4, 5, 11);
+    }
+  }
+
+  function drawTutorPrompt() {
+    if (!tutorOn() || board.open || !tutor.near) return;
+    if (tutor.phase !== 'idle') return;
+    const label = tutorTouch() ? '터치 · 말 걸기' : '[E] 말 걸기';
+    const { h } = instructorSize();
+    const ty = instructor.y - h - 18;
+    ctx.font = TUTOR_FONT;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'alphabetic';
+    ctx.lineJoin = 'round';
+    ctx.lineWidth = 3.5;
+    ctx.strokeStyle = 'rgba(16, 9, 6, 0.9)';
+    ctx.fillStyle = '#fff6e0';
+    strokeFillText(label, instructor.x, ty);
+    ctx.textAlign = 'left';
   }
 
   function viewingBoard() {
@@ -1528,13 +1936,6 @@
       el.style.height = ph + 'px';
       el.style.transform = 'rotate(' + (p.rot || 0) + 'deg)';
     });
-    const hint = wantedBoardEl.querySelector('.wanted-hint');
-    if (hint) {
-      const g = worldToScreen(lay.x, lay.top + lay.h * 0.93);
-      const c = gameToClient(g.x, g.y);
-      hint.style.left = c.x + 'px';
-      hint.style.top = c.y + 'px';
-    }
   }
 
   function syncViewCam(dt) {
@@ -1587,15 +1988,30 @@
     showBoardNotice.timer = setTimeout(() => wantedNoticeEl.classList.remove('is-on'), 1800);
   }
 
+  function boardTouchUI() {
+    if (usingTouch) return true;
+    try { if (matchMedia('(hover: none)').matches) return true; } catch (_) {}
+    return false;
+  }
+
   function showWantedBoard() {
     if (netReady) return;
     board.open = true;
+    if (tutor.taught || tutor.phase === 'done') {
+      tutor.taught = true;
+      tutor.say = '';
+      tutor.shown = 0;
+      tutor.phase = 'idle';
+    }
     if (wantedNoticeEl) wantedNoticeEl.classList.remove('is-on');
     if (wantedBoardEl) {
+      wantedBoardEl.classList.toggle('is-touch', boardTouchUI());
       wantedBoardEl.classList.add('is-on');
       wantedBoardEl.querySelectorAll('.wanted-sheet.is-open').forEach(el => el.classList.remove('is-open'));
-      const multi = wantedBoardEl.querySelector('.wanted-sheet.is-multi');
-      if (multi) multi.classList.add('is-open');
+      if (boardTouchUI()) {
+        const multi = wantedBoardEl.querySelector('.wanted-sheet.is-multi');
+        if (multi) multi.classList.add('is-open');
+      }
     }
     syncTitle();
   }
@@ -1604,6 +2020,21 @@
     if (wantedBoardEl) wantedBoardEl.classList.remove('is-joining', 'is-seeking');
     const input = document.getElementById('wantedJoinCode');
     if (input) input.value = '';
+  }
+
+  function cancelHostOnPaper() {
+    if (window.GunNet) GunNet.cancel();
+    myRole = null;
+    other = null;
+    netReady = false;
+    awaitMap = false;
+    pendingArena = null;
+    setPortalStatus('');
+    if (!wantedBoardEl) return;
+    wantedBoardEl.classList.remove('is-hosting', 'is-joining', 'is-seeking');
+    wantedBoardEl.querySelectorAll('.wanted-sheet.is-open').forEach(el => el.classList.remove('is-open'));
+    const multi = wantedBoardEl.querySelector('.wanted-sheet.is-multi');
+    if (multi) multi.classList.add('is-open');
   }
 
   function cancelJoinSeek() {
@@ -1664,11 +2095,12 @@
   if (wantedBoardEl) {
     wantedBoardEl.addEventListener('click', e => {
       const sheet = e.target && e.target.closest ? e.target.closest('.wanted-sheet') : null;
+      if (sheet && sheet.classList.contains('is-locked')) return;
       if (sheet && !(e.target.closest && e.target.closest('[data-act], input, button'))) {
         wantedBoardEl.querySelectorAll('.wanted-sheet.is-open').forEach(el => {
           if (el !== sheet) el.classList.remove('is-open');
         });
-        sheet.classList.add('is-open');
+        if (boardTouchUI()) sheet.classList.add('is-open');
       }
       const act = e.target && e.target.closest ? e.target.closest('[data-act]') : null;
       const which = act && act.dataset ? act.dataset.act : (e.target.classList && e.target.classList.contains('wanted-dim') ? 'close' : '');
@@ -1681,11 +2113,8 @@
           awaitMap = false;
           pendingArena = null;
         }
-        if (wantedBoardEl.classList.contains('is-hosting') || wantedBoardEl.classList.contains('is-seeking')) {
-          cancelWantedLobby();
-        } else {
-          hideWantedBoard();
-        }
+        if (wantedBoardEl.classList.contains('is-hosting')) cancelHostOnPaper();
+        hideWantedBoard();
       }
       else if (which === 'host') {
         bindRoles('host');
@@ -1693,9 +2122,8 @@
       } else if (which === 'join') openJoinOnPaper();
       else if (which === 'join-back') closeJoinOnPaper();
       else if (which === 'join-cancel') cancelJoinSeek();
-      else if (which === 'ai') showBoardNotice('아직 현상금이 붙지 않았소');
-      else if (which === 'train') hideWantedBoard();
-      else if (which === 'cancel') cancelWantedLobby();
+      else if (which === 'ai') startAiDuel(act && act.dataset ? act.dataset.ai : 1);
+      else if (which === 'cancel') cancelHostOnPaper();
     });
     const joinInput = document.getElementById('wantedJoinCode');
     if (joinInput) {
@@ -1723,7 +2151,6 @@
   const mouse = { x: W * 0.7, y: H * 0.6, down: false };
   let usingTouch = false;
   const stick = { id: null, x0: 0, y0: 0, x: 0, y: 0, t0: 0, jumped: false };
-  const firePtr = { id: null };
 
   addEventListener('keydown', e => {
     if (e.repeat || !me) return;
@@ -1740,16 +2167,22 @@
         return;
       }
       if (wantedBoardEl && wantedBoardEl.classList.contains('is-hosting')) {
-        cancelWantedLobby();
+        cancelHostOnPaper();
         return;
       }
       setPortalOpen(false);
       return;
     }
-    if (e.code === 'KeyE' && board.near && !netReady) {
-      openWantedMenu();
-      e.preventDefault();
-      return;
+    if (e.code === 'KeyE' && !netReady) {
+      if (tryTalkInstructor()) {
+        e.preventDefault();
+        return;
+      }
+      if (board.near) {
+        openWantedMenu();
+        e.preventDefault();
+        return;
+      }
     }
     if (locked()) return;
     if (e.code === 'Space' || e.code === 'KeyW') {
@@ -1769,9 +2202,9 @@
     };
   }
 
-  function stickDead() { return Math.max(24, W * 0.018); }
-  function stickSwipe() { return Math.max(48, W * 0.032); }
-  function stickJump() { return Math.max(56, H * 0.08); }
+  function stickDead() { return Math.max(22, 18 / Math.max(cssScale(), 0.001)); }
+  function stickSwipe() { return Math.max(48, 36 / Math.max(cssScale(), 0.001)); }
+  function stickJump() { return Math.max(52, 40 / Math.max(cssScale(), 0.001)); }
 
   function tryLandscape() {
     const o = screen.orientation;
@@ -1783,6 +2216,14 @@
     const w = screenToWorld(sx, sy);
     const lay = wantedLayout();
     return Math.abs(w.x - lay.x) < lay.w * 0.55 && w.y > lay.top - 40 && w.y < lay.top + lay.h + 24;
+  }
+
+  function tapOnInstructor(sx, sy) {
+    if (!tutorOn() || board.open) return false;
+    const w = screenToWorld(sx, sy);
+    const { w: iw, h: ih } = instructorSize();
+    return Math.abs(w.x - instructor.x) < Math.max(46, iw * 0.55)
+      && w.y < instructor.y + 12 && w.y > instructor.y - ih - 28;
   }
 
   function snapAim(sx, sy) {
@@ -1797,26 +2238,57 @@
     if (me.shoulder) me.aim = aimRotation(me.shoulder.x, me.shoulder.y, me.facing, ax, ay);
   }
 
-  function endStick(e) {
-    if (stick.id == null || e.pointerId !== stick.id) return;
-    const p = e.clientX != null ? evtXY(e) : { x: stick.x, y: stick.y };
-    const dt = (performance.now() - stick.t0) / 1000;
-    const dx = p.x - stick.x0;
-    const dy = p.y - stick.y0;
-    const dist = Math.hypot(dx, dy);
+  const fingers = new Map();
+
+  function bindStick() {
     stick.id = null;
-    if (!me) return;
-    if (dist < stickDead() && dt < 0.32 && !netReady && board.near) {
-      openWantedMenu();
+    for (const [id, g] of fingers) {
+      if (!g.dragged) continue;
+      stick.id = id;
+      stick.x0 = g.x0; stick.y0 = g.y0;
+      stick.x = g.x; stick.y = g.y;
+      stick.t0 = g.t0;
+      stick.jumped = !!g.jumped;
       return;
     }
-    if (locked()) return;
+  }
+
+  function gestureSwipe(g, p) {
+    if (locked() || !me) return;
+    const dx = p.x - g.x0, dy = p.y - g.y0;
+    const dist = Math.hypot(dx, dy);
+    const dt = (performance.now() - g.t0) / 1000;
     const sw = stickSwipe(), jp = stickJump();
-    if (dt < 0.3 && dist > sw * 0.85) {
-      if (dy < -jp && -dy >= Math.abs(dx) * 0.62) me.jumpQueued = 0.12;
-      else if (Math.abs(dx) > sw * 0.7) startDodge(me, dx > 0 ? 1 : -1);
-      else if (dy < -jp * 0.7) me.jumpQueued = 0.12;
+    if (dt > 0.32 || dist < sw * 0.85) return;
+    if (dy < -jp && -dy >= Math.abs(dx) * 0.62) me.jumpQueued = 0.12;
+    else if (Math.abs(dx) > sw * 0.7) startDodge(me, dx > 0 ? 1 : -1);
+    else if (dy < -jp * 0.7) me.jumpQueued = 0.12;
+  }
+
+  function endFinger(e) {
+    const g = fingers.get(e.pointerId);
+    if (!g) return;
+    const p = e.clientX != null ? evtXY(e) : { x: g.x, y: g.y };
+    fingers.delete(e.pointerId);
+    const dist = Math.hypot(p.x - g.x0, p.y - g.y0);
+    if (!g.dragged && dist < stickDead()) {
+      if (!netReady && tapOnInstructor(p.x, p.y) && tryTalkInstructor()) {
+        bindStick();
+        return;
+      }
+      if (!netReady && tapOnWanted(p.x, p.y)) {
+        openWantedMenu();
+        bindStick();
+        return;
+      }
+      if (me && !board.open && !locked()) {
+        snapAim(g.x0, g.y0);
+        tryFire(me);
+      }
+    } else if (g.dragged) {
+      gestureSwipe(g, p);
     }
+    bindStick();
   }
 
   cvs.addEventListener('pointerdown', e => {
@@ -1826,25 +2298,11 @@
       if (board.open || drafting()) return;
       e.preventDefault();
       const p = evtXY(e);
-      if (p.x < W * 0.5 && stick.id == null) {
-        stick.id = e.pointerId;
-        stick.x0 = stick.x = p.x;
-        stick.y0 = stick.y = p.y;
-        stick.t0 = performance.now();
-        stick.jumped = false;
-        try { cvs.setPointerCapture(e.pointerId); } catch (err) {}
-        return;
-      }
-      if (p.x >= W * 0.5 && firePtr.id == null) {
-        firePtr.id = e.pointerId;
-        snapAim(p.x, p.y);
-        try { cvs.setPointerCapture(e.pointerId); } catch (err) {}
-        if (!netReady && (board.near && tapOnWanted(p.x, p.y))) {
-          openWantedMenu();
-          return;
-        }
-        if (me && !board.open && !locked()) tryFire(me);
-      }
+      fingers.set(e.pointerId, {
+        x0: p.x, y0: p.y, x: p.x, y: p.y,
+        t0: performance.now(), dragged: false, jumped: false,
+      });
+      try { cvs.setPointerCapture(e.pointerId); } catch (err) {}
       return;
     }
     usingTouch = false;
@@ -1860,18 +2318,19 @@
   cvs.addEventListener('pointermove', e => {
     const p = evtXY(e);
     if (e.pointerType === 'touch' || e.pointerType === 'pen') {
-      if (e.pointerId === firePtr.id) {
-        snapAim(p.x, p.y);
-        return;
-      }
-      if (e.pointerId !== stick.id) return;
+      const g = fingers.get(e.pointerId);
+      if (!g) return;
       e.preventDefault();
-      stick.x = p.x;
-      stick.y = p.y;
-      const dx = stick.x - stick.x0, dy = stick.y - stick.y0;
-      if (!stick.jumped && dy < -stickJump() && -dy > Math.abs(dx) * 0.75) {
-        stick.jumped = true;
-        if (me && !locked()) me.jumpQueued = 0.12;
+      g.x = p.x; g.y = p.y;
+      const dist = Math.hypot(p.x - g.x0, p.y - g.y0);
+      if (!g.dragged && dist > stickDead()) g.dragged = true;
+      if (g.dragged) {
+        bindStick();
+        const dx = p.x - g.x0, dy = p.y - g.y0;
+        if (!g.jumped && dy < -stickJump() && -dy > Math.abs(dx) * 0.75) {
+          g.jumped = true;
+          if (me && !locked()) me.jumpQueued = 0.12;
+        }
       }
       return;
     }
@@ -1880,9 +2339,8 @@
   }, { passive: false });
 
   function onPtrEnd(e) {
-    if (e.pointerId === firePtr.id) firePtr.id = null;
-    endStick(e);
-    if (e.pointerType !== 'touch' && e.pointerType !== 'pen') mouse.down = false;
+    if (e.pointerType === 'touch' || e.pointerType === 'pen') endFinger(e);
+    else mouse.down = false;
   }
   cvs.addEventListener('pointerup', onPtrEnd);
   cvs.addEventListener('pointercancel', onPtrEnd);
@@ -1901,7 +2359,6 @@
   }
 
   function playAim() {
-    if (usingTouch && firePtr.id != null) return { x: mouse.x + camX, y: mouse.y };
     if (usingTouch && stick.id != null && me) {
       const d = moveDir() || me.facing;
       return { x: me.x + d * 90, y: me.y - BODY_H * 0.45 };
@@ -1919,7 +2376,7 @@
     for (const k of Object.keys(keys)) keys[k] = false;
     mouse.down = false;
     stick.id = null;
-    firePtr.id = null;
+    fingers.clear();
     for (const pl of players) {
       pl.vx = 0; pl.vy = 0; pl.jumpQueued = 0; pl.dodgeT = 0;
     }
@@ -1937,7 +2394,8 @@
       dodgeT: 0, dodgeDir: 1, dodgeCD: 0,
       shoulder: { x: 0, y: 0 }, muzzle: { x: 0, y: 0 },
       hp: MAX_HP, hpShow: MAX_HP, hpDrain: 1, invuln: 0, jumpQueued: 0,
-      hatT: 0, bellNext: false, dodgeSafe: true, reloadMax: RELOAD_TIME, reloadTo: AMMO,
+      hatT: 0, bellNext: false, dodgeSafe: true, reloadMax: RELOAD_TIME, reloadTo: AMMO, reloadFrom: AMMO,
+      climb: false, dropT: 0,
     };
   }
   const players = [makePlayer(0, 'host'), makePlayer(1, 'guest')];
@@ -1949,6 +2407,190 @@
     other = role === 'host' ? players[1] : players[0];
   }
 
+  function resetAiBot() {
+    aiBot.t = 0;
+    aiBot.dir = 0;
+    aiBot.fireCd = 0.45;
+    aiBot.dodgeCd = 0;
+    aiBot.jumpCd = 0;
+    aiBot.aimX = 0;
+    aiBot.aimY = 0;
+    aiBot.draftWait = 0;
+    aiBot.head = false;
+    aiBot.campX = null;
+    aiBot.campT = 0;
+    aiBot.push = false;
+    aiBot.hideT = 0;
+  }
+
+  function startAiDuel(level) {
+    if (netReady) return;
+    if (window.GunNet) GunNet.cancel();
+    vsAi = true;
+    aiLevel = clamp(level | 0, 0, 2);
+    resetAiBot();
+    bindRoles('host');
+    netReady = true;
+    beginRound(true);
+  }
+
+  function aiSpec() {
+    return AI_LEVELS[aiLevel] || AI_LEVELS[1];
+  }
+
+  function updateAiDraft(dt) {
+    if (!vsAi || !draft || draft.burning || draft.revealing) return;
+    if (draft.turn === myRole) {
+      aiBot.draftWait = 0;
+      return;
+    }
+    aiBot.draftWait += dt;
+    if (aiBot.draftWait < 0.9) return;
+    aiBot.draftWait = 0;
+    const left = draft.ids.filter(id => !draft.banned.includes(id));
+    if (left.length <= 1) return;
+    const spec = aiSpec();
+    let pick = left[(Math.random() * left.length) | 0];
+    if (Math.random() < spec.law) {
+      const prefer = left.filter(id => id === 'sniper' || id === 'hasty' || id === 'twin' || id === 'iron' || id === 'wings');
+      if (prefer.length) pick = prefer[(Math.random() * prefer.length) | 0];
+    }
+    banDraftCard(pick, false);
+  }
+
+  function bulletThreat(pl) {
+    for (const b of bullets) {
+      if (b.ownerId === pl.id) continue;
+      const dx = b.x - pl.x;
+      const dy = b.y - (pl.y - BODY_H * 0.55);
+      if (dx * b.vx >= 0) continue;
+      if (Math.abs(dx) < 280 && Math.abs(dy) < 44) return b;
+    }
+    return null;
+  }
+
+  function aiHasLos() {
+    if (!other || !me) return false;
+    const tip = gunTip(other);
+    return !obstacleRayHit(tip.x, tip.y, me.x, me.y - BODY_H * (aiBot.head ? 0.78 : 0.48));
+  }
+
+  function aiCoverX() {
+    if (!obstacles.length || !other || !me) return null;
+    let best = null, bestScore = 1e9;
+    for (let i = 0; i < obstacles.length; i++) {
+      const b = obstacles[i];
+      const side = Math.sign(other.x - b.x) || 1;
+      const hx = b.x - side * (b.w * 0.55 + 26);
+      if (hx < 50 || hx > W - 50) continue;
+      const between = (b.x - other.x) * (b.x - me.x) < 0;
+      const score = Math.abs(hx - other.x) - (between ? 90 : 0) - (b.tall ? 28 : 0);
+      if (score < bestScore) { bestScore = score; best = hx; }
+    }
+    return best;
+  }
+
+  function aiHighX() {
+    if (!other) return null;
+    const now = groundAt(other.x);
+    let bestX = other.x, bestY = now;
+    for (let x = 70; x <= W - 70; x += 36) {
+      const gy = groundAt(x);
+      if (gy < bestY - 14) { bestY = gy; bestX = x; }
+    }
+    return bestY < now - 14 ? bestX : null;
+  }
+
+  function updateAi(dt) {
+    if (!vsAi || !other || !me) return;
+    updateAiDraft(dt);
+    const frozen = matchOver || lockT > 0 || drafting() || overOpen || wiping() || other.hp <= 0;
+    const spec = aiSpec();
+    if (!frozen) {
+      aiBot.t -= dt;
+      aiBot.fireCd -= dt;
+      aiBot.dodgeCd -= dt;
+      aiBot.jumpCd -= dt;
+      if (aiBot.campX == null || Math.abs(me.x - aiBot.campX) > 46 || Math.abs(me.vx) > 150) {
+        aiBot.campX = me.x;
+        aiBot.campT = 0;
+        aiBot.push = false;
+      } else {
+        aiBot.campT += dt;
+        if (aiBot.campT > 1.7) aiBot.push = true;
+      }
+      const threat = bulletThreat(other);
+      const cover = aiCoverX();
+      const atCover = cover != null && Math.abs(other.x - cover) < 40;
+      if (atCover) aiBot.hideT += dt;
+      else aiBot.hideT = 0;
+      if (threat && other.onGround) {
+        if (aiBot.dodgeCd <= 0 && Math.random() < spec.dodge) {
+          const away = other.x < me.x ? -1 : 1;
+          startDodge(other, Math.random() < 0.72 ? away : -away);
+          aiBot.dodgeCd = 0.85;
+        } else if (aiBot.jumpCd <= 0 && other.dodgeT <= 0 && Math.random() < spec.jump) {
+          other.jumpQueued = 0.12;
+          aiBot.jumpCd = 0.9;
+        }
+      }
+      if (aiBot.t <= 0) {
+        aiBot.t = AI_THINK * (0.7 + Math.random() * 0.5);
+        const dist = me.x - other.x;
+        const ad = Math.abs(dist);
+        const away = -(Math.sign(dist) || 1);
+        let dir = 0;
+        if (ad < 150) dir = away;
+        else if (aiBot.hideT > 1.05) dir = Math.sign(dist) || 1;
+        else if (aiBot.push && ad > 175) dir = Math.sign(dist) || 1;
+        else if (!aiHasLos() && ad > 140) dir = Math.sign(dist) || 1;
+        else if (threat && spec.terrain > 0.18 && cover != null && Math.abs(other.x - cover) > 16) {
+          dir = Math.sign(cover - other.x);
+        } else if (Math.random() < 0.32) dir = Math.random() < 0.5 ? -1 : 1;
+        if (lawIs('wings') && spec.law > 0.45 && aiBot.hideT < 0.4) {
+          const high = aiHighX();
+          if (high != null && Math.abs(other.x - high) > 18) dir = Math.sign(high - other.x);
+        }
+        aiBot.dir = dir;
+        aiBot.head = Math.random() < clamp(0.82 - spec.acc * 1.85, 0.08, 0.86);
+        if (lawIs('sniper') && spec.law > 0.35) aiBot.head = spec.law > 0.7 || Math.random() < spec.law;
+      }
+      if (aiBot.dir && other.onGround && aiBot.jumpCd <= 0 && Math.random() < spec.terrain) {
+        const ahead = other.x + aiBot.dir * 42;
+        if (groundAt(ahead) < other.y - 26) {
+          other.jumpQueued = 0.12;
+          aiBot.jumpCd = 0.95;
+        }
+      }
+      const lead = (1 - spec.acc) * 0.1;
+      aiBot.aimX = me.x + me.vx * lead;
+      aiBot.aimY = me.y - BODY_H * (aiBot.head ? 0.78 : 0.47);
+    }
+    updatePlayer(other, {
+      dir: frozen ? 0 : aiBot.dir,
+      aimX: aiBot.aimX || me.x,
+      aimY: aiBot.aimY || (me.y - BODY_H * 0.47),
+    }, dt);
+    if (frozen) return;
+    if (other.ammo <= 0 && other.reloadT <= 0 && (other.autoReload || 0) <= 0) startReload(other, true);
+    else if (aiBot.fireCd <= 0 && other.ammo > 0 && other.reloadT <= 0 && other.dodgeT <= 0 && !other.climb) {
+      if (me.x > other.x + 6) other.facing = 1;
+      else if (me.x < other.x - 6) other.facing = -1;
+      const sh = other.shoulder || { x: other.x, y: other.y - BODY_H * 0.55 };
+      other.aim = aimRotation(sh.x, sh.y, other.facing, aiBot.aimX || me.x, aiBot.aimY || (me.y - BODY_H * 0.47));
+      const tip = gunTip(other);
+      const hatWait = spec.law > 0.5 && lawIs('hat') && other.hatT > 0;
+      const needLos = spec.terrain > 0.35;
+      const muzzleLow = tip.y > other.y - 28;
+      if (!hatWait && !muzzleLow && (!needLos || aiHasLos())) {
+        tryFire(other);
+        aiBot.fireCd = 0;
+      } else {
+        aiBot.fireCd = 0.12;
+      }
+    }
+  }
+
   function spawnXs() {
     return [W * 0.22, W * 0.78];
   }
@@ -1956,7 +2598,7 @@
   function resetMatchSpawn() {
     const [sx0, sx1] = spawnXs();
     players[0].x = sx0;
-    players[0].y = groundAt(sx0);
+    players[0].y = standAt(sx0);
     players[0].vx = 0; players[0].vy = 0;
     players[0].facing = 1;
     players[0].onGround = true;
@@ -1968,9 +2610,11 @@
     players[0].dodgeSafe = true; players[0].reloadMax = lawReloadTime();
     players[0].reloadTo = lawAmmo();
     players[0].net = null;
+    players[0].muzzle = { x: players[0].x + 42, y: players[0].y - BODY_H * 0.46 };
+    players[0].shoulder = { x: players[0].x + 8, y: players[0].y - BODY_H * 0.55 };
 
     players[1].x = sx1;
-    players[1].y = groundAt(sx1);
+    players[1].y = standAt(sx1);
     players[1].vx = 0; players[1].vy = 0;
     players[1].facing = -1;
     players[1].onGround = true;
@@ -1982,8 +2626,12 @@
     players[1].dodgeSafe = true; players[1].reloadMax = lawReloadTime();
     players[1].reloadTo = lawAmmo();
     players[1].net = null;
+    players[1].muzzle = { x: players[1].x - 42, y: players[1].y - BODY_H * 0.46 };
+    players[1].shoulder = { x: players[1].x - 8, y: players[1].y - BODY_H * 0.55 };
     players[0].jumpQueued = 0;
     players[1].jumpQueued = 0;
+    players[0].climb = false; players[1].climb = false;
+    players[0].dropT = 0; players[1].dropT = 0;
     matchOver = false;
     overOpen = false;
     bullets.length = 0;
@@ -2060,7 +2708,7 @@
     pl.invuln = Math.max(0, (s.invuln || 0) - s.age);
     pl.kick = lerp(pl.kick, s.kick || 0, k);
 
-    const gy = groundAt(pl.x);
+    const gy = standAt(pl.x);
     if (s.onGround) {
       if (pl.y < gy - 5) {
         pl.vy = Math.max(pl.vy + 2300 * dt, 520);
@@ -2134,6 +2782,7 @@
       bullets.push({
         x: data.x, y: data.y, vx: data.vx, vy: data.vy,
         life: 1.2, ownerId: data.ownerId, net: true, fat: data.fat || 1,
+        treePass: !!data.treePass,
       });
       flashes.push({ x: data.x, y: data.y, t: 0 });
     } else if (data.t === 'hurt') {
@@ -2261,6 +2910,11 @@
 
   function requestRematch() {
     myRematch = true;
+    if (vsAi) {
+      otherRematch = true;
+      beginRound(seriesOver());
+      return;
+    }
     if (window.GunNet) GunNet.send({ t: 'rematch' });
     if (otherRematch) beginRound(seriesOver());
     else {
@@ -2297,6 +2951,7 @@
       pendingSeed = null;
     }
     resetMatchSpawn();
+    if (vsAi) resetAiBot();
     matchAge = 0;
     syncMatchHud();
     if (fresh || !activeLaws.length) {
@@ -2311,6 +2966,7 @@
     GunNet.setHandlers({
       status: setPortalStatus,
       ready: role => {
+        vsAi = false;
         bindRoles(role);
         netReady = true;
         beginRound(true);
@@ -2353,13 +3009,19 @@
     }
   });
 
-  function startReload(pl) {
+  function startReload(pl, autoEmpty) {
     if (locked()) return;
     if (pl.reloadT > 0 || pl.ammo >= lawAmmo()) return;
     const full = lawAmmo();
-    pl.reloadTo = lawIs('misfire') ? Math.min(full, 3 + Math.floor(Math.random() * 4)) : full;
+    const kept = pl.ammo;
+    let to = full;
+    if (lawIs('misfire')) to = Math.min(full, 3 + Math.floor(Math.random() * 4));
+    pl.reloadFrom = kept;
+    pl.reloadTo = Math.max(kept, to);
     pl.reloadMax = lawReloadTime();
     pl.reloadT = pl.reloadMax;
+    pl.autoReload = 0;
+    pl.chaliceHeal = !!autoEmpty;
   }
 
   function startDodge(pl, moveDir) {
@@ -2367,14 +3029,31 @@
     if (pl.dodgeT > 0 || pl.dodgeCD > 0 || !pl.onGround) return;
     pl.dodgeDir = moveDir || pl.facing;
     pl.dodgeT = DODGE_TIME;
-    pl.dodgeCD = 1;
+    pl.dodgeCD = DODGE_COOLDOWN;
     pl.dodgeSafe = lawIs('clumsy') ? Math.random() < 0.5 : true;
     pl.vx = pl.dodgeDir * lawDodgeSpeed();
     dust(pl.x, pl.y, 6);
+    if (!netReady && tutor.phase === 'quest' && tutor.lesson === 2) {
+      tutor.dodges += 1;
+      refreshTutorQuest();
+    }
+  }
+
+  function gunTip(pl) {
+    const mx = pl.muzzle && pl.muzzle.x;
+    const my = pl.muzzle && pl.muzzle.y;
+    if (mx != null && my != null
+        && Math.abs(mx - pl.x) < 90
+        && my < pl.y - 22
+        && my > pl.y - BODY_H - 36) {
+      return { x: mx, y: my };
+    }
+    const f = pl.facing || 1;
+    return { x: pl.x + f * 44, y: pl.y - BODY_H * 0.46 };
   }
 
   function fireShot(pl) {
-    if (pl.ammo <= 0 || pl.reloadT > 0) return;
+    if (pl.ammo <= 0 || pl.reloadT > 0 || pl.dodgeT > 0) return;
     pl.ammo -= 1;
     const airborne = !pl.onGround;
     pl.kickV += airborne ? 48 : 34;
@@ -2383,13 +3062,18 @@
     let a = pl.facing === 1 ? pl.aim : Math.PI - pl.aim;
     if (airborne) a += rand(-0.04, 0.04);
     if (pl.hatT > 0) a += rand(-lawAimShake(), lawAimShake());
+    if (vsAi && pl === other) {
+      const acc = aiSpec().acc;
+      a += (Math.random() * 2 - 1) * acc * (0.85 + Math.random() * 0.4);
+    }
     const spd = lawBulletSpeed();
     const fat = lawBulletFat();
-    const { x, y } = pl.muzzle;
+    const { x, y } = gunTip(pl);
     const vx = Math.cos(a) * spd, vy = Math.sin(a) * spd;
-    bullets.push({ x, y, vx, vy, life: 1.2, ownerId: pl.id, fat });
+    const treePass = Math.random() < 0.5;
+    bullets.push({ x, y, vx, vy, life: 1.2, ownerId: pl.id, fat, treePass });
     flashes.push({ x, y, t: 0 });
-    if (netReady && window.GunNet) GunNet.send({ t: 'fire', x, y, vx, vy, ownerId: pl.id, fat });
+    if (netReady && window.GunNet) GunNet.send({ t: 'fire', x, y, vx, vy, ownerId: pl.id, fat, treePass });
     for (let i = 0; i < 4; i++) {
       particles.push({
         type: 'smoke', x, y, vx: Math.cos(a) * rand(20, 60) + rand(-15, 15), vy: Math.sin(a) * rand(20, 60) - rand(15, 35),
@@ -2399,10 +3083,12 @@
     pl.vx -= Math.cos(a) * (airborne ? 55 : 40);
     if (airborne) pl.vy -= Math.sin(a) * 35;
     if (pl.ammo === 0) pl.autoReload = 0.35;
+    if (!netReady && tutor.phase === 'quest' && tutor.lesson === 3) tutor.shots++;
   }
 
   function tryFire(pl) {
-    if (!me || pl !== me || locked()) return;
+    if (!me || locked()) return;
+    if (pl !== me && !(vsAi && pl === other)) return;
     if (pl.reloadT > 0 || pl.cooldown > 0 || pl.dodgeT > 0 || pl.burstT > 0) return;
     if (pl.ammo <= 0) { startReload(pl); return; }
     const twin = lawIs('twin') && pl.ammo >= 2;
@@ -2459,7 +3145,7 @@
       const prevX = pl.x;
       pl.x = clamp(pl.x + pl.vx * dt, 40, W - 40);
       resolveObstacleX(pl, prevX);
-      const gy = groundAt(pl.x);
+      const gy = floorAt(pl.x, pl.y, pl.dropT > 0);
       if (pl.onGround) {
         pl.y = gy; pl.vy = 0;
       } else {
@@ -2503,31 +3189,76 @@
       resolveObstacleX(pl, prevX);
     }
 
+    pl.dropT = Math.max(0, (pl.dropT || 0) - dt);
+    const wantDown = pl === me && (keys.KeyS || keys.ArrowDown);
+    const lad = pl.dodgeT <= 0 ? climbInfo(pl.x, pl.y) : null;
+    const wantUp = !!(pl.jumpQueued > 0 || (pl === me && (keys.Space || keys.KeyW)));
     pl.jumpQueued -= dt;
-    if (pl.jumpQueued > 0 && pl.onGround && pl.dodgeT <= 0) {
-      pl.vy = -lawJump(); pl.onGround = false; pl.airT = 0; pl.squashV -= 2.6; pl.jumpQueued = 0;
-      pl.hatT = 0.5;
-      dust(pl.x, groundAt(pl.x), 5);
-      if (netReady && window.GunNet) { netAcc = 0; GunNet.send(packState(pl)); }
-    }
-    const gy = groundAt(pl.x);
-    if (pl.onGround) {
-      pl.y = gy;
-      pl.vy = 0;
-    } else {
-      pl.vy += 2300 * dt;
-      pl.y += pl.vy * dt;
-      if (pl.y >= gy) {
-        if (!pl.onGround) {
-          pl.squashV += clamp(pl.vy / 900, 0.5, 1.5) * 2.6;
-          pl.landT = 0.1;
-          dust(pl.x, gy, 8);
-          if (netReady && window.GunNet) { netAcc = 0; GunNet.send(packState(pl)); }
-        }
-        pl.y = gy; pl.vy = 0; pl.onGround = true;
-      } else {
+    const onDeck = !!(lad && pl.onGround && Math.abs(pl.y - lad.deckY) <= 14);
+
+    if (wantDown && pl.onGround && !onDeck) {
+      const raised = floorAt(pl.x, pl.y, false);
+      const gnd = standAt(pl.x);
+      pl.dropT = 0.18;
+      if (raised < gnd - 8) {
         pl.onGround = false;
-        pl.airT += dt;
+        pl.vy = 140;
+      }
+    }
+
+    if (lad && (wantUp || wantDown && (onDeck || pl.climb) || pl.climb) && (pl.y > lad.deckY + 4 || wantDown && onDeck || pl.climb && wantDown)) {
+      pl.climb = true;
+      pl.jumpQueued = 0;
+      pl.onGround = false;
+      pl.vy = wantDown ? 280 : wantUp ? -340 : 90;
+      pl.y += pl.vy * dt;
+      if (!wantDown && pl.y <= lad.deckY) {
+        pl.y = lad.deckY;
+        pl.vy = 0;
+        pl.onGround = true;
+        pl.climb = false;
+      } else if (pl.y >= lad.gy) {
+        pl.y = standAt(pl.x);
+        pl.vy = 0;
+        pl.onGround = true;
+        pl.climb = false;
+      }
+    } else {
+      pl.climb = false;
+      if (pl.jumpQueued > 0 && pl.onGround && pl.dodgeT <= 0) {
+        pl.vy = -lawJump(); pl.onGround = false; pl.airT = 0; pl.squashV -= 2.6; pl.jumpQueued = 0;
+        pl.hatT = 0.5;
+        dust(pl.x, groundAt(pl.x), 5);
+        if (pl === me && !netReady && tutor.phase === 'quest' && tutor.lesson === 1) {
+          tutor.jumps += 1;
+          refreshTutorQuest();
+        }
+        if (netReady && window.GunNet) { netAcc = 0; GunNet.send(packState(pl)); }
+      }
+      const gy = floorAt(pl.x, pl.y, pl.dropT > 0);
+      if (pl.onGround) {
+        if (gy > pl.y + 18) {
+          pl.onGround = false;
+          pl.vy = Math.max(pl.vy, 140);
+        } else {
+          pl.y = gy;
+          pl.vy = 0;
+        }
+      } else {
+        pl.vy += 2300 * dt;
+        pl.y += pl.vy * dt;
+        if (pl.y >= gy) {
+          if (!pl.onGround) {
+            pl.squashV += clamp(pl.vy / 900, 0.5, 1.5) * 2.6;
+            pl.landT = 0.1;
+            dust(pl.x, gy, 8);
+            if (netReady && window.GunNet) { netAcc = 0; GunNet.send(packState(pl)); }
+          }
+          pl.y = gy; pl.vy = 0; pl.onGround = true;
+        } else {
+          pl.onGround = false;
+          pl.airT += dt;
+        }
       }
     }
     pl.landT -= dt;
@@ -2550,17 +3281,19 @@
       pl.burstT -= dt;
       if (pl.burstT <= 0) {
         pl.burstT = 0;
-        if (!locked() && pl.hp > 0 && pl.reloadT <= 0 && pl.ammo > 0) fireShot(pl);
+        if (!locked() && pl.hp > 0 && pl.reloadT <= 0 && pl.ammo > 0 && pl.dodgeT <= 0) fireShot(pl);
       }
     }
     pl.invuln = Math.max(0, pl.invuln - dt);
-    if (pl.autoReload > 0) { pl.autoReload -= dt; if (pl.autoReload <= 0) startReload(pl); }
+    if (pl.autoReload > 0) { pl.autoReload -= dt; if (pl.autoReload <= 0) startReload(pl, true); }
     if (pl.reloadT > 0) {
       pl.reloadT -= dt;
       if (pl.reloadT <= 0) {
         pl.reloadT = 0;
         pl.ammo = pl.reloadTo || lawAmmo();
-        if (lawIs('chalice')) pl.hp = Math.min(lawMaxHp(), pl.hp + 3);
+        if (lawIs('chalice') && pl.chaliceHeal) pl.hp = Math.min(lawMaxHp(), pl.hp + 2);
+        pl.chaliceHeal = false;
+        if (!netReady && tutor.phase === 'quest' && tutor.lesson === 3) tutor.reloaded = true;
       }
     }
   }
@@ -2603,7 +3336,9 @@
     const kb = lawIs('lastshot') ? 2 : 1;
     pl.vx += Math.sign(b.vx || 1) * (head ? 420 : 320) * kb;
     pl.vy -= (head ? 280 : 220) * kb;
+    if (pl.vy < -lawJump()) pl.vy = -lawJump();
     pl.onGround = false;
+    pl.jumpQueued = 0;
     pl.squashV += head ? 3 : 2;
     impact(b.x, b.y);
     sparks(b.x, b.y, head ? 10 : 6, false);
@@ -2623,7 +3358,7 @@
     else board.y = groundAt(board.x);
 
     if (!me.init) {
-      me.x = W * 0.28; me.y = groundAt(me.x); me.facing = 1; me.init = true;
+      me.x = W * 0.28; me.y = standAt(me.x); me.facing = 1; me.init = true;
       camX = 0;
       placePortal();
     }
@@ -2649,7 +3384,10 @@
       aimY: aim.y,
     }, dt);
 
-    if (netReady && other) updateRemote(other, dt);
+    updateTutor(dt);
+
+    if (vsAi) updateAi(dt);
+    else if (netReady && other) updateRemote(other, dt);
     syncTitle();
 
     // 체력바 표시값: 실제 HP를 향해 천천히 감소 (헤드샷이면 3배)
@@ -2683,7 +3421,7 @@
       for (let s = 0; s < 4 && !dead; s++) {
         const x0 = b.x, y0 = b.y;
         b.x += b.vx * dt / 4; b.y += b.vy * dt / 4;
-        const cover = obstacleRayHit(x0, y0, b.x, b.y);
+        const cover = obstacleRayHit(x0, y0, b.x, b.y, b);
         if (cover) {
           b.x = cover.x; b.y = cover.y;
           impact(b.x, b.y); sparks(b.x, b.y, 5, false); dead = true;
@@ -2695,18 +3433,22 @@
           }
         }
         if (netReady) {
-          if (!dead && other && b.ownerId === me.id && other.hp > 0 && hitBox(other, b)) {
-            if (isProtected(other)) {
-              dead = true;
-            } else {
-              impact(b.x, b.y); sparks(b.x, b.y, 6, false);
-              if (isHeadshot(other, b)) {
-                headFlash = 0.18;
-                shake = Math.min(shake + 7, 12);
-                sparks(b.x, b.y, 8, false);
+          if (!dead && other && b.ownerId === me.id && other.hp > 0) {
+            if (vsAi) {
+              if (hitPlayer(other, b)) dead = true;
+            } else if (hitBox(other, b)) {
+              if (isProtected(other)) {
+                dead = true;
+              } else {
+                impact(b.x, b.y); sparks(b.x, b.y, 6, false);
+                if (isHeadshot(other, b)) {
+                  headFlash = 0.18;
+                  shake = Math.min(shake + 7, 12);
+                  sparks(b.x, b.y, 8, false);
+                }
+                other.invuln = INVULN_TIME;
+                dead = true;
               }
-              other.invuln = INVULN_TIME;
-              dead = true;
             }
           }
           if (!dead && b.ownerId !== me.id && hitPlayer(me, b)) dead = true;
@@ -2721,7 +3463,7 @@
     }
 
     netAcc += dt;
-    if (netReady && netAcc >= 1 / 20 && window.GunNet) {
+    if (netReady && !vsAi && netAcc >= 1 / 20 && window.GunNet) {
       netAcc = 0;
       GunNet.send(packState(me));
     }
@@ -2916,9 +3658,12 @@
     const g0 = A.meta.gun[0];
     const mlx = (g0.mx - g0.gx) * GUN_K, mly = (g0.my - g0.gy) * GUN_K;
     const m = ctx.getTransform();
+    const z = viewZ || 1;
+    const sx = (m.a * mlx + m.c * mly + m.e) / DPR;
+    const sy = (m.b * mlx + m.d * mly + m.f) / DPR;
     S.muzzle = {
-      x: (m.a * mlx + m.c * mly + m.e) / DPR - offX,
-      y: (m.b * mlx + m.d * mly + m.f) / DPR - offY,
+      x: (sx - W / 2) / z + viewZX - offX,
+      y: (sy - H / 2) / z + viewZY - offY,
     };
     if (S.flashT > 0) {
       const fl = A.meta.flash[0];
@@ -3259,21 +4004,16 @@
     }
 
     if (board.near && !board.open) {
-      const m = (board.status || '').match(/수배 번호:\s*(\d{4})/);
-      const label = usingTouch
-        ? (m ? '터치 · 수배 ' + m[1] : '터치 · 현상수배')
-        : (m ? '[E] 수배 ' + m[1] : '[E] 현상수배');
+      const label = usingTouch ? '터치 · 게시판 보기' : '[E] 게시판 보기';
       const ty = lay.top - 18;
-      ctx.font = 'bold 15px "Malgun Gothic", sans-serif';
+      ctx.font = TUTOR_FONT;
       ctx.textAlign = 'center';
-      const tw = ctx.measureText(label).width;
-      ctx.fillStyle = 'rgba(18, 10, 6, 0.78)';
-      ctx.fillRect(lay.x - tw / 2 - 10, ty - 16, tw + 20, 26);
-      ctx.strokeStyle = 'rgba(244, 230, 208, 0.55)';
-      ctx.lineWidth = 1.5;
-      ctx.strokeRect(lay.x - tw / 2 - 10, ty - 16, tw + 20, 26);
+      ctx.textBaseline = 'alphabetic';
+      ctx.lineJoin = 'round';
+      ctx.lineWidth = 3.5;
+      ctx.strokeStyle = 'rgba(16, 9, 6, 0.9)';
       ctx.fillStyle = '#fff6e0';
-      ctx.fillText(label, lay.x, ty);
+      strokeFillText(label, lay.x, ty);
       ctx.textAlign = 'left';
     }
   }
@@ -3295,9 +4035,11 @@
 
     // 내 탄약만
     const cyl = lawAmmo();
+    const kept = me.reloadT > 0 ? (me.reloadFrom != null ? me.reloadFrom : me.ammo) : me.ammo;
     const fillTo = me.reloadT > 0 ? (me.reloadTo || cyl) : me.ammo;
+    const empty = Math.max(0, fillTo - kept);
     const shown = me.reloadT > 0
-      ? Math.min(fillTo, Math.floor((1 - me.reloadT / (me.reloadMax || RELOAD_TIME)) * (fillTo + 1)))
+      ? kept + Math.min(empty, Math.floor((1 - me.reloadT / (me.reloadMax || RELOAD_TIME)) * (empty + 1)))
       : me.ammo;
     const ammoRight = me.skin === 'guest';
     const ammoH = 34;
@@ -3429,6 +4171,11 @@
       if (fade > 0.02) {
         ctx.save();
         ctx.globalAlpha *= fade;
+        if (!netReady) {
+          drawInstructor(t);
+          drawTutorSpeech(t);
+          drawTutorPrompt();
+        }
         const list = netReady ? players : [me];
         const states = list.map(pl => playerState(pl, t));
         if (states.some(S => S.idle && S.skin !== 'guest') && idle) warpIdle(t, idle);
@@ -3437,7 +4184,12 @@
           const pl = list[i];
           drawCharacter(S);
           pl.shoulder = S.shoulder;
-          if (S.muzzle) pl.muzzle = S.muzzle;
+          if (S.muzzle) {
+            const tip = S.muzzle;
+            if (Math.abs(tip.x - pl.x) < 90 && tip.y < pl.y - 18 && tip.y > pl.y - BODY_H - 36) {
+              pl.muzzle = tip;
+            }
+          }
         });
         if (netReady) for (const pl of players) drawHeadHpBar(pl);
         ctx.restore();
