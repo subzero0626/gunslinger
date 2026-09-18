@@ -40,20 +40,13 @@
   function resize() {
     const mobile = isLoFi();
     const box = viewBox();
-    let cssW, cssH, left, top, gameW, gameH;
-    if (mobile) {
-      gameW = DESIGN_W;
-      gameH = DESIGN_H;
-      const fit = Math.min(box.w / gameW, box.h / gameH);
-      cssW = gameW * fit;
-      cssH = gameH * fit;
-      left = (box.w - cssW) * 0.5;
-      top = (box.h - cssH) * 0.5;
-    } else {
-      gameW = box.w;
-      gameH = box.h;
-      cssW = gameW; cssH = gameH; left = 0; top = 0;
-    }
+    const gameW = DESIGN_W;
+    const gameH = DESIGN_H;
+    const fit = Math.min(box.w / gameW, box.h / gameH);
+    const cssW = gameW * fit;
+    const cssH = gameH * fit;
+    const left = (box.w - cssW) * 0.5;
+    const top = (box.h - cssH) * 0.5;
     const nextDPR = mobile ? 1 : Math.min(window.devicePixelRatio || 1, 2);
     if (gameW === W && gameH === H && nextDPR === DPR && cvs.width === Math.round(gameW * nextDPR)) {
       placeLayer(cvs, cssW, cssH, left, top);
