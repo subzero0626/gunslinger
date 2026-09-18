@@ -100,9 +100,9 @@
   const AI_THINK = 0.22;
   const AI_FIRE = 0.62;
   const AI_LEVELS = [
-    { name: '풋내기', acc: 0.56, dodge: 0.03, jump: 0.01, law: 0.03, terrain: 0.02 },
-    { name: '현상금 사냥꾼', acc: 0.32, dodge: 0.2, jump: 0.09, law: 0.24, terrain: 0.2 },
-    { name: '전설', acc: 0.26, dodge: 0.32, jump: 0.16, law: 0.36, terrain: 0.3 },
+    { name: '풋내기', acc: 0.5, dodge: 0.05, jump: 0.02, law: 0.05, terrain: 0.04 },
+    { name: '현상금 사냥꾼', acc: 0.26, dodge: 0.26, jump: 0.12, law: 0.3, terrain: 0.26 },
+    { name: '전설', acc: 0.2, dodge: 0.4, jump: 0.22, law: 0.44, terrain: 0.38 },
   ];
   const aiBot = { t: 0, dir: 0, fireCd: 0.45, dodgeCd: 0, jumpCd: 0, aimX: 0, aimY: 0, draftWait: 0, head: false, campX: null, campT: 0, push: false, hideT: 0 };
   const BG_GROUND = 0.7717;
@@ -244,7 +244,7 @@
   const BULLET_SPEED = 3200;
   const RUN_STRIDE = 26;                    // 프레임 1장당 이동 거리(px) → 발 미끄러짐 방지
   // 시트마다 캐릭터가 그려진 크기가 달라서 모자 폭 기준으로 맞춤 (walk = 1)
-  const ANIM_SCALE = { walk: 1, run: 1.26, jump: 1.13, dodge: 1.17 };
+  const ANIM_SCALE = { walk: 1, run: 1.26, jump: 1, dodge: 1.17 };
   const frameScale = (anim) => ANIM_SCALE[anim];
   const SHOULDER_BACK = 22, SHOULDER_DOWN = 4.4; // 어깨를 몸 안쪽·위쪽으로 (화면 px)
   const CAPE_OVER_R = 22;                     // 팔 위로 망토를 다시 덮는 반경 (화면 px)
@@ -300,6 +300,7 @@
   const OBJ_DIRT = 8; // 연한 갈색 중간 → 진한 갈색 지면
   const OBJ_MASKS = {};
   const obstacles = [];
+  let obstaclePlan = [];
   const MASK_A = 40;
 
   function objImg(id) {
@@ -397,26 +398,35 @@
     return mask.bits[y * mask.w + x] !== 0;
   }
 
-  function layoutObstacles() {
-    obstacles.length = 0;
-    if (!W || !H) return;
+  function objAspect(id) {
+    const img = objImg(id);
+    if (img && img.width && img.height) return img.width / img.height;
+    return 0.62;
+  }
+
+  function bgXFromU(u) {
+    const bg = playBg();
+    const lay = bgLayout(bg);
+    if (!lay) return W * u;
+    return lay.dx + u * lay.dw;
+  }
+
+  function planObstacles() {
+    obstaclePlan = [];
     if (!inMatch()) return;
     const rng = seeded(obstacleSeed || 7);
-    const pool = OBJ_IDS.filter(id => objImg(id) && OBJ_MASKS[id]);
+    const pool = OBJ_IDS.slice();
     for (let i = pool.length - 1; i > 0; i--) {
       const j = (rng() * (i + 1)) | 0;
       const t = pool[i]; pool[i] = pool[j]; pool[j] = t;
     }
-    const want = 4 + (rng() < 0.55 ? 1 : 0) + (rng() < 0.35 ? 1 : 0);
+    const want = 2 + (rng() < 0.45 ? 1 : 0);
     const bands = plateauBands();
     const placed = [];
-    for (let p = 0; p < pool.length && obstacles.length < want; p++) {
+    for (let p = 0; p < pool.length && obstaclePlan.length < want; p++) {
       const id = pool[p];
-      const img = objImg(id);
-      const mask = OBJ_MASKS[id];
       const h = objDrawH(id);
-      const dw = h * (img.width / img.height);
-      const half = dw * 0.5 / W + 0.012;
+      const half = h * objAspect(id) * 0.5 / DESIGN_W + 0.012;
       let put = false;
       for (let k = 0; k < 14 && !put; k++) {
         const band = bands[(rng() * bands.length) | 0];
@@ -429,25 +439,44 @@
         }
         if (hit) continue;
         placed.push({ u, half });
-        const x = W * u;
-        const gy = groundAt(x);
-        const padB = Math.max(0, (mask.h - 1 - (mask.foot == null ? mask.h - 1 : mask.foot)) / mask.h);
-        const plant = OBJ_TREE[id]
-          ? OBJ_PLANT + Math.min(18, h * 0.08)
-          : (activeMapId() === 'flat' ? OBJ_DIRT + 2 : 3 + 15);
-        obstacles.push({
-          id, img, mask, x,
-          gy,
-          y: gy + plant + h * padB,
-          w: dw,
-          h,
-          tall: !!OBJ_TALL[id],
-          tree: !!OBJ_TREE[id],
-          leaf: !!OBJ_TREE_LEAF[id],
-        });
+        obstaclePlan.push({ id, u });
         put = true;
       }
     }
+  }
+
+  function placeObstaclePlan() {
+    obstacles.length = 0;
+    if (!W || !H || !inMatch()) return;
+    for (let i = 0; i < obstaclePlan.length; i++) {
+      const p = obstaclePlan[i];
+      const img = objImg(p.id);
+      const mask = OBJ_MASKS[p.id];
+      if (!img || !img.width || !mask) continue;
+      const h = objDrawH(p.id);
+      const dw = h * (img.width / img.height);
+      const x = bgXFromU(p.u);
+      const gy = groundAt(x);
+      const padB = Math.max(0, (mask.h - 1 - (mask.foot == null ? mask.h - 1 : mask.foot)) / mask.h);
+      const plant = OBJ_TREE[p.id]
+        ? OBJ_PLANT + Math.min(18, h * 0.08)
+        : (activeMapId() === 'flat' ? OBJ_DIRT + 2 : 3 + 15);
+      obstacles.push({
+        id: p.id, img, mask, x,
+        gy,
+        y: gy + plant + h * padB,
+        w: dw,
+        h,
+        tall: !!OBJ_TALL[p.id],
+        tree: !!OBJ_TREE[p.id],
+        leaf: !!OBJ_TREE_LEAF[p.id],
+      });
+    }
+  }
+
+  function layoutObstacles() {
+    planObstacles();
+    placeObstaclePlan();
   }
 
   function obstacleAt(wx, wy) {
@@ -556,7 +585,8 @@
   }
 
   addEventListener('resize', () => {
-    if (Object.keys(OBJ_MASKS).length) layoutObstacles();
+    if (obstaclePlan.length) placeObstaclePlan();
+    else if (Object.keys(OBJ_MASKS).length) layoutObstacles();
   });
 
   const sources = {
@@ -663,7 +693,12 @@
   function start() {
     const a = A.meta.arm[ARM_FRAME], g = A.meta.gun[0];
     const fistX = (a.fx - a.px) * ARM_K, fistY = (a.fy - a.py) * ARM_K;
-    GG = { fistX, fistY, barrelY: fistY + (g.my - g.gy) * GUN_K };
+    GG = {
+      fistX, fistY,
+      barrelY: fistY + (g.my - g.gy) * GUN_K,
+      muzzleX: fistX + (g.mx - g.gx) * GUN_K,
+      muzzleY: fistY + (g.my - g.gy) * GUN_K,
+    };
     buildCapeOverlays();
     buildCapeOverlaysBlue();
     buildBlueBodies();
@@ -2771,7 +2806,7 @@
       pl.landT = 0;
     }
     pl.squashV += (-300 * pl.squash - 18 * pl.squashV) * dt;
-    pl.squash += pl.squashV * dt;
+    pl.squash = clamp(pl.squash + pl.squashV * dt, -0.08, 0.14);
     if (pl.onGround) pl.runPhase += Math.abs(pl.vx) * dt / RUN_STRIDE;
     if (pl.y > gy) { pl.y = gy; pl.onGround = true; }
   }
@@ -3061,16 +3096,18 @@
   }
 
   function gunTip(pl) {
-    const mx = pl.muzzle && pl.muzzle.x;
-    const my = pl.muzzle && pl.muzzle.y;
-    if (mx != null && my != null
-        && Math.abs(mx - pl.x) < 90
-        && my < pl.y - 22
-        && my > pl.y - BODY_H - 36) {
-      return { x: mx, y: my };
-    }
     const f = pl.facing || 1;
-    return { x: pl.x + f * 44, y: pl.y - BODY_H * 0.46 };
+    const sh = pl.shoulder && Number.isFinite(pl.shoulder.x) && Number.isFinite(pl.shoulder.y)
+      ? pl.shoulder
+      : { x: pl.x + f * 8, y: pl.y - BODY_H * 0.55 };
+    const rot = pl.aim || 0;
+    const lx = GG ? GG.muzzleX : 44;
+    const ly = GG ? GG.muzzleY : 0;
+    const c = Math.cos(rot), s = Math.sin(rot);
+    return {
+      x: sh.x + f * (c * lx - s * ly),
+      y: sh.y + (s * lx + c * ly),
+    };
   }
 
   function fireShot(pl) {
@@ -3179,7 +3216,7 @@
       pl.invuln = Math.max(0, pl.invuln - dt);
       pl.flashT -= dt;
       pl.squashV += (-300 * pl.squash - 18 * pl.squashV) * dt;
-      pl.squash += pl.squashV * dt;
+      pl.squash = clamp(pl.squash + pl.squashV * dt, -0.08, 0.14);
       return;
     }
     const dir = input.dir;
@@ -3247,7 +3284,7 @@
     } else {
       pl.climb = false;
       if (pl.jumpQueued > 0 && pl.onGround && pl.dodgeT <= 0) {
-        pl.vy = -lawJump(); pl.onGround = false; pl.airT = 0; pl.squashV -= 2.6; pl.jumpQueued = 0;
+        pl.vy = -lawJump(); pl.onGround = false; pl.airT = 0; pl.squashV -= 0.8; pl.jumpQueued = 0;
         pl.hatT = 0.5;
         dust(pl.x, groundAt(pl.x), 5);
         if (pl === me && !netReady && tutor.phase === 'quest' && tutor.lesson === 1) {
@@ -3270,7 +3307,7 @@
         pl.y += pl.vy * dt;
         if (pl.y >= gy) {
           if (!pl.onGround) {
-            pl.squashV += clamp(pl.vy / 900, 0.5, 1.5) * 2.6;
+            pl.squashV += clamp(pl.vy / 900, 0.35, 1) * 1.2;
             pl.landT = 0.1;
             dust(pl.x, gy, 8);
             if (netReady && window.GunNet) { netAcc = 0; GunNet.send(packState(pl)); }
@@ -3287,7 +3324,7 @@
     if (pl.onGround) pl.runPhase += Math.abs(pl.vx) * dt / RUN_STRIDE;
 
     pl.squashV += (-300 * pl.squash - 18 * pl.squashV) * dt;
-    pl.squash += pl.squashV * dt;
+    pl.squash = clamp(pl.squash + pl.squashV * dt, -0.08, 0.14);
     pl.kickV += (-260 * pl.kick - 22 * pl.kickV) * dt;
     pl.kick += pl.kickV * dt;
 
@@ -3586,8 +3623,8 @@
     return {
       x: pl.x, y: pl.y, facing: pl.facing, anim, i, idle: isIdle,
       skin: pl.skin, invuln: pl.invuln,
-      sx: 1 + pl.squash * 0.7 - breath * 0.006,
-      sy: 1 - pl.squash + breath * 0.014,
+      sx: 1 + pl.squash * 0.28 - breath * 0.006,
+      sy: 1 - pl.squash * 0.32 + breath * 0.014,
       R: pl.aim, kick: pl.kick,
       reload: pl.reloadT > 0 ? 1 - pl.reloadT / (pl.reloadMax || RELOAD_TIME) : 0,
       flashT: pl.flashT, showArm: anim !== 'dodge',
@@ -3646,8 +3683,8 @@
     ctx.restore();
 
     S.shoulder = {
-      x: S.x + rx + S.facing * ((f.sx - f.ax) * k - SHOULDER_BACK) * S.sx,
-      y: S.y + ry + ((f.sy - f.ay) * k + SHOULDER_DOWN) * S.sy,
+      x: S.x + rx + S.facing * ((f.sx - f.ax) * k - SHOULDER_BACK),
+      y: S.y + ry + ((f.sy - f.ay) * k + SHOULDER_DOWN),
     };
     if (S.showArm) {
       drawArm(S);
@@ -4202,12 +4239,7 @@
           const pl = list[i];
           drawCharacter(S);
           pl.shoulder = S.shoulder;
-          if (S.muzzle) {
-            const tip = S.muzzle;
-            if (Math.abs(tip.x - pl.x) < 90 && tip.y < pl.y - 18 && tip.y > pl.y - BODY_H - 36) {
-              pl.muzzle = tip;
-            }
-          }
+          if (S.muzzle) pl.muzzle = S.muzzle;
         });
         if (netReady) for (const pl of players) drawHeadHpBar(pl);
         ctx.restore();
